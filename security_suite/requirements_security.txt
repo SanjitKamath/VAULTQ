@@ -1,0 +1,4 @@
+cryptography>=42.0.0
+pydantic>=2.6.0
+mlkem>=0.0.3
+dilithium-py>=1.4.0
