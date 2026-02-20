@@ -3,6 +3,8 @@ import os
 from pydantic import BaseModel
 from typing import Optional, List
 import secrets
+from pathlib import Path
+from .audit_logger import get_audit_logger
 
 # --- Pydantic Models for API Validation ---
 
@@ -25,28 +27,46 @@ class CertRecord(BaseModel):
 
 class VaultQDatabase:
     def __init__(self):
-        self.db_file = "hospital_vault.json"
+        self.audit = get_audit_logger()
+        base_dir = Path(__file__).resolve().parents[1]
+        self.db_file = base_dir/ "storage" / "hospital_vault.json"
         self.doctors = {}
         self.certificates = {}
+        self.audit.info("DB init: loading vault database from %s", self.db_file)
         self.load_db()
 
     def load_db(self):
-        if os.path.exists(self.db_file):
-            try:
-                with open(self.db_file, "r") as f:
-                    data = json.load(f)
-                    self.doctors = data.get("doctors", {})
-                    self.certificates = data.get("certificates", {})
-            except Exception as e:
-                print(f"Error loading DB: {e}")
+        if not self.db_file.exists():
+            self.audit.info("DB load: file not found, creating new database file")
+            self.save_db()   # create empty DB file on first run
+            return
+
+        try:
+            with open(self.db_file, "r") as f:
+                data = json.load(f)
+                self.doctors = data.get("doctors", {})
+                self.certificates = data.get("certificates", {})
+                self.audit.info(
+                    "DB load: completed (doctors=%s certificates=%s)",
+                    len(self.doctors),
+                    len(self.certificates),
+                )
+        except Exception as e:
+            self.audit.exception("DB load error: %s", str(e))
 
     def save_db(self):
+        self.db_file.parent.mkdir(parents=True, exist_ok=True)  
         with open(self.db_file, "w") as f:
             json.dump({
                 "doctors": self.doctors, 
                 "certificates": self.certificates
             }, f, indent=4)
-
+        self.audit.info(
+            "DB save: persisted (doctors=%s certificates=%s)",
+            len(self.doctors),
+            len(self.certificates),
+        )
+            
     def get_all_doctors(self):
         """Returns all doctor records ensuring every record has an 'id' field for the UI."""
         results = []
@@ -64,6 +84,7 @@ class VaultQDatabase:
 
         doc_id = doc_dict.get("id") or doc_dict.get("doctor_id")
         self.doctors[doc_id] = doc_dict
+        self.audit.info("DB add_doctor: doctor_id=%s", doc_id)
         self.save_db()
 
     def add_pre_authorized_doctor(self, doc_id, name, password):
@@ -75,14 +96,17 @@ class VaultQDatabase:
             "specialty": "General Practice",
             "pqc_public_key_b64": None
         }
+        self.audit.info("DB add_pre_authorized_doctor: doctor_id=%s name=%s", doc_id, name)
         self.save_db()
 
     def delete_doctor(self, doctor_id: str):
         if doctor_id in self.doctors:
             del self.doctors[doctor_id]
             self.certificates = {k: v for k, v in self.certificates.items() if v.get("doctor_id") != doctor_id}
+            self.audit.info("DB delete_doctor: doctor_id=%s and associated certs removed", doctor_id)
             self.save_db()
             return True
+        self.audit.warning("DB delete_doctor: doctor_id not found (%s)", doctor_id)
         return False
     
     def add_certificate(self, cert_data):
@@ -93,6 +117,7 @@ class VaultQDatabase:
             
         cert_id = cert_dict.get("id")
         self.certificates[cert_id] = cert_dict
+        self.audit.info("DB add_certificate: cert_id=%s doctor_id=%s", cert_id, cert_dict.get("doctor_id"))
         self.save_db()
 
     def save_certificate_record(self, doctor_id: str, pem_data: str, expires_at: float):
@@ -112,6 +137,7 @@ class VaultQDatabase:
             "expires_at": expires_at,
             "status": "active"
         }
+        self.audit.info("DB save_certificate_record: cert_id=%s doctor_id=%s", cert_id, doctor_id)
         
         # Save to the JSON file immediately
         self.save_db()

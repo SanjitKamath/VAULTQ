@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VaultQ | System Administration</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -58,7 +58,7 @@
             <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
                 <div class="p-6 border-b border-gray-800 flex justify-between items-center">
                     <h2 class="text-xl font-bold">Authorized Personnel</h2>
-                    <button @click="refresh()" class="text-sm text-cyan-500 hover:underline">↻ Refresh List</button>
+                    <button @click="refresh()" class="text-sm text-cyan-500 hover:underline">Refresh List</button>
                 </div>
                 <table class="w-full text-left">
                     <thead class="bg-black/50 text-gray-400 uppercase text-xs">
@@ -66,6 +66,7 @@
                             <th class="py-4 px-4">Doctor ID</th>
                             <th class="py-4 px-4">Name</th>
                             <th class="py-4 px-4">Status</th>
+                            <th class="py-4 px-4">Password</th>
                             <th class="py-4 px-4 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -80,12 +81,44 @@
                                         class="px-2 py-1 rounded text-xs uppercase font-bold">
                                     </span>
                                 </td>
+                                <td class="py-4 px-4">
+                                    <div class="flex items-center gap-3">
+                                        <span
+                                            class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 
+                                                font-mono text-xs tracking-wider text-slate-300"
+                                            x-text="revealedPasswords[doc.id] ? revealedPasswords[doc.id] : '********'">
+                                        </span>
+
+                                        <button
+                                            @click="togglePassword(doc.id)"
+                                            class="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 transition-colors"
+                                            title="Reveal password"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
+                                                viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7
+                                                    -1.274 4.057-5.064 7-9.542 7
+                                                    -4.477 0-8.268-2.943-9.542-7z" />
+                                            </svg>
+                                            <span class="text-xs font-semibold">
+                                            <span x-text="revealedPasswords[doc.id] ? 'HIDE' : 'VIEW'"></span>
+                                            </span>
+                                        </button>
+                                    </div>
+                                </td>
                                 <td class="py-4 px-4 text-right">
                                     <button x-show="doc.status !== 'active'" @click="issueCert(doc.id)" 
                                             class="text-xs px-3 py-1 rounded font-bold mr-2 transition-all"
                                             :class="!doc.pqc_public_key_b64 ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500'"
                                             :title="!doc.pqc_public_key_b64 ? 'Doctor must log in to the app first to enroll keys' : 'Issue Certificate'">
                                         ISSUE CA CERT
+                                    </button>
+                                    <button @click="updateDoctorPassword(doc.id)"
+                                            class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
+                                        CHANGE PASSWORD
                                     </button>
                                     <button @click="deleteDoctor(doc.id)" 
                                             class="text-xs text-red-500 hover:text-red-400 font-bold">
@@ -95,7 +128,7 @@
                             </tr>
                         </template>
                         <tr x-show="doctors.length === 0">
-                            <td colspan="4" class="py-12 text-center text-slate-500 italic">No doctors provisioned yet.</td>
+                            <td colspan="5" class="py-12 text-center text-slate-500 italic">No doctors provisioned yet.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -108,6 +141,7 @@
             return {
                 stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, ca_algorithm: '...' },
                 doctors: [],
+                revealedPasswords: {},
                 newDocName: '',        
                 lastProvisioned: null, 
 
@@ -123,6 +157,7 @@
                         ]);
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
+                        this.revealedPasswords = {};
                     } catch (e) {
                         console.error("Failed to refresh dashboard:", e);
                     }
@@ -162,6 +197,53 @@
                         }
                     } catch (e) {
                         console.error("Failed to issue cert:", e);
+                    }
+                },
+
+                async togglePassword(doctorId) {
+                    if (this.revealedPasswords[doctorId]) {
+                        delete this.revealedPasswords[doctorId];
+                        this.revealedPasswords = { ...this.revealedPasswords };
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/password`);
+                        if (!resp.ok) {
+                            alert("Failed to load password.");
+                            return;
+                        }
+                        const data = await resp.json();
+                        this.revealedPasswords[doctorId] = data.password || '';
+                        this.revealedPasswords = { ...this.revealedPasswords };
+                    } catch (e) {
+                        alert("Network error while loading password.");
+                    }
+                },
+
+                async updateDoctorPassword(doctorId) {
+                    const newPassword = prompt(`Enter a new password for ${doctorId}:`);
+                    if (newPassword === null) return;
+                    if (!newPassword.trim()) {
+                        alert("Password cannot be empty.");
+                        return;
+                    }
+
+                    try {
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/password`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: newPassword.trim() })
+                        });
+                        if (!resp.ok) {
+                            const errorData = await resp.json().catch(() => ({}));
+                            alert(errorData.detail || "Failed to update password.");
+                            return;
+                        }
+                        this.revealedPasswords[doctorId] = newPassword.trim();
+                        this.revealedPasswords = { ...this.revealedPasswords };
+                        alert("Password updated successfully.");
+                    } catch (e) {
+                        alert("Network error while updating password.");
                     }
                 },
 
