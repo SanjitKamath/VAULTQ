@@ -13,24 +13,25 @@ from .models import HandshakeResponse, HandshakePayload, UploadForm
 class SecurityAgent:
     """Manages the PQC State and Network Operations asynchronously."""
     
-    # CRITICAL FIX 1: Accept the loaded_private_key from the Local Vault
-    def __init__(self, log_callback, status_callback, loaded_private_key: bytes = None):
+    # CRITICAL FIX 1: Accept the loaded_private_key and doctor_id
+    def __init__(self, log_callback, status_callback, loaded_private_key: bytes = None, doctor_id: str = None):
         self.log = log_callback
-        self.update_status = status_callback
+        self.status = status_callback
+        self.doctor_id = doctor_id # Store the ID for the SecureEnvelope
         
         self.session_key = None
         self.is_connected = False
         
-        self.log("Initializing local PQC Identity (ML-DSA)...")
+        self.log("Security agent initialized", "INFO")
         
         # Load existing key if logged in, otherwise generate a new one
         if loaded_private_key:
             self.signer = DSAManager(private_bytes=loaded_private_key)
-            self.log("Existing ML-DSA Identity loaded from secure vault.")
+            self.log("Existing ML-DSA Identity loaded from secure vault.", "INFO")
         else:
             self.signer = DSAManager(private_bytes=None)
             self.signer.generate_keypair() 
-            self.log("New ML-DSA Identity generated.")
+            self.log("New ML-DSA Identity generated.", "INFO")
         
         self.ecdh = ECDHManager()
         self.kem = KEMManager()
@@ -98,12 +99,20 @@ class SecurityAgent:
         self.log("Signing patient payload with ML-DSA Identity...", "DEBUG")
         signature = self.signer.sign(encrypted_payload)
         
+        # Guard clause in case the signer itself fails
+        if not signature:
+            raise ValueError("ML-DSA Signer failed to generate a signature.")
+            
+        # FIX: Safely handle the public key since the local vault only loaded the private key
+        pub_bytes = self.signer.get_public_bytes()
+        encoded_pub_key = base64.b64encode(pub_bytes).decode() if pub_bytes else ""
+        
         return {
             "nonce": base64.b64encode(nonce).decode(),
             "wrapped_dek": base64.b64encode(wrapped_dek).decode(),
             "encrypted_payload": base64.b64encode(encrypted_payload).decode(),
             "doctor_signature": base64.b64encode(signature).decode(),
-            "doctor_public_key": base64.b64encode(self.signer.get_public_bytes()).decode()
+            "doctor_public_key": encoded_pub_key # Will send an empty string safely if None
         }
 
     def process_and_upload(self, form: UploadForm):
@@ -135,10 +144,14 @@ class SecurityAgent:
             # 3. Server Authentication Signature
             self.log("Signing transport envelope for Server...", "DEBUG")
             transit_signature = self.signer.sign(transit_ciphertext)
+            
+            if not transit_signature:
+                raise ValueError("Transport signing failed.")
 
             # 4. Package for Server Storage
+            # FIX: Ensure we use self.doctor_id as the kid
             envelope = SecureEnvelope(
-                kid=config.doctor_kid,
+                kid=self.doctor_id or config.doctor_kid or "unknown_kid",
                 nonce=base64.b64encode(transit_nonce).decode(),
                 timestamp=int(time.time()),
                 payload=base64.b64encode(transit_ciphertext).decode(),
@@ -152,5 +165,17 @@ class SecurityAgent:
             
             self.log(f"Upload Successful! ID: {resp.json().get('record_id')}", "SUCCESS")
 
+        except requests.exceptions.HTTPError as e:
+             # This will catch the 403 Forbidden if the cert isn't issued yet
+             error_detail = e.response.json().get('detail', str(e))
+             self.log(f"Upload Rejected: {error_detail}", "ERROR")
         except Exception as e:
             self.log(f"Upload Error: {str(e)}", "ERROR")
+
+    def update_status(self, connected: bool):
+        """Uses the status callback to update the UI or terminal."""
+        self.is_connected = connected
+        if self.status:
+            # This triggers set_connection_status in the UI 
+            # or print() during enrollment
+            self.status(connected)

@@ -7,115 +7,193 @@ from core.security_agent import SecurityAgent
 import requests
 import time
 
-# Set modern theme
+# --- App Theme ---
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+ctk.set_widget_scaling(1.1)
+ctk.set_window_scaling(1.1)
+
 
 class VaultQDoctorApp(ctk.CTk):
     def __init__(self, doctor_id: str, private_key: bytes):
         super().__init__()
-        self.title(f"VaultQ - Doctor Portal ({doctor_id})")
-        self.geometry("600x500")
-        
-        self.doctor_id = doctor_id
-        self.selected_file = None
 
-        # Pass the unlocked ML-DSA private key into the Security Agent
+        self.title(f"VaultQ – Doctor Portal")
+        self.minsize(900, 600)
+        self.geometry("1000x650")
+
+        self.doctor_id = doctor_id
+        self.selected_file_path = None
+
+        self._center_window()
+        self._build_ui()
+
+        self.append_log = self._write_log
+
         self.agent = SecurityAgent(
-            log_callback=self.append_log, 
+            log_callback=self.append_log,
             status_callback=self.set_connection_status,
             loaded_private_key=private_key
         )
+        
+        self.agent = SecurityAgent(
+            log_callback=self.append_log, 
+            status_callback=self.set_connection_status,
+            loaded_private_key=private_key,
+            doctor_id=doctor_id # Pass the ID here
+        )
 
-        self._build_ui()
+    # ---------------- UI ---------------- #
+
+    def _center_window(self):
+        self.update_idletasks()
+        w, h = 1000, 650
+        x = (self.winfo_screenwidth() // 2) - (w // 2)
+        y = (self.winfo_screenheight() // 2) - (h // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build_ui(self):
-        # Grid Layout: 1 row, 2 columns (Sidebar, Main Content)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        # --- SIDEBAR ---
-        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        # --- Top Bar ---
+        self.top_bar = ctk.CTkFrame(self, height=60, corner_radius=0)
+        self.top_bar.grid(row=0, column=0, sticky="nsew")
+        self.top_bar.grid_columnconfigure(1, weight=1)
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="VaultQ", font=ctk.CTkFont(size=24, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 5))
-        
-        self.doc_label = ctk.CTkLabel(self.sidebar_frame, text=config.doctor_name, font=ctk.CTkFont(size=12), text_color="gray")
-        self.doc_label.grid(row=1, column=0, padx=20, pady=(0, 30))
+        self.app_title = ctk.CTkLabel(
+            self.top_bar,
+            text="VaultQ",
+            font=ctk.CTkFont(size=20, weight="bold")
+        )
+        self.app_title.grid(row=0, column=0, padx=20, pady=15, sticky="w")
 
-        self.connect_btn = ctk.CTkButton(self.sidebar_frame, text="Initiate Handshake", command=self.action_connect)
-        self.connect_btn.grid(row=2, column=0, padx=20, pady=10)
+        self.status_label = ctk.CTkLabel(self.top_bar, text="● Disconnected", text_color="#ef4444")
+        self.status_label.grid(row=0, column=2, padx=20)
 
-        # Status Indicator
-        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="⚫ Disconnected", text_color="#ef4444", font=ctk.CTkFont(weight="bold"))
-        self.status_label.grid(row=3, column=0, padx=20, pady=10)
+        self.connect_btn = ctk.CTkButton(self.top_bar, text="Connect", command=self.action_connect, width=100)
+        self.connect_btn.grid(row=0, column=3, padx=(0, 20))
 
-        # --- MAIN CONTENT ---
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-        self.main_frame.grid_rowconfigure(2, weight=1) # Makes log box expand
+        # --- Tabs ---
+        self.tabs = ctk.CTkTabview(self)
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=20, pady=20)
 
-        # Header
-        self.header = ctk.CTkLabel(self.main_frame,text="Secure Record Upload",font=ctk.CTkFont(size=28, weight="normal"))
+        self.upload_tab = self.tabs.add("Upload")
+        self.logs_tab = self.tabs.add("Activity")
+        self.settings_tab = self.tabs.add("Settings")
 
-        self.header.grid(row=0, column=0, sticky="w", pady=(0, 20))
+        self._build_upload_tab()
+        self._build_logs_tab()
+        self._build_settings_tab()
 
-        # Upload Card
-        self.upload_card = ctk.CTkFrame(self.main_frame, corner_radius=15)
-        self.upload_card.grid(row=1, column=0, sticky="ew", pady=(0, 20))
-        self.upload_card.grid_columnconfigure(1, weight=1)
+    # ---------------- Upload Tab ---------------- #
 
-        ctk.CTkLabel(self.upload_card, text="Patient ID:").grid(row=0, column=0, padx=20, pady=20, sticky="w")
-        self.patient_id_entry = ctk.CTkEntry(self.upload_card, placeholder_text="e.g., PAT-8821")
-        self.patient_id_entry.grid(row=0, column=1, padx=20, pady=20, sticky="ew")
+    def _build_upload_tab(self):
+        self.upload_tab.grid_columnconfigure(0, weight=1)
 
-        self.file_btn = ctk.CTkButton(self.upload_card, text="Select PDF/DICOM", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), command=self.action_select_file)
+        self.header = ctk.CTkLabel(
+            self.upload_tab,
+            text="Secure Record Upload",
+            font=ctk.CTkFont(size=24, weight="bold")
+        )
+        self.header.grid(row=0, column=0, sticky="w", pady=(10, 20))
+
+        self.card = ctk.CTkFrame(self.upload_tab, corner_radius=16)
+        self.card.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        self.card.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self.card, text="Patient ID").grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
+        self.patient_id_entry = ctk.CTkEntry(self.card, placeholder_text="PAT-8821")
+        self.patient_id_entry.grid(row=0, column=1, padx=20, pady=(20, 10), sticky="ew")
+
+        self.file_btn = ctk.CTkButton(
+            self.card,
+            text="Select File (PDF / DICOM)",
+            command=self.action_select_file,
+            fg_color="transparent",
+            border_width=1
+        )
         self.file_btn.grid(row=1, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
-        
-        self.file_label = ctk.CTkLabel(self.upload_card, text="No file selected", text_color="gray")
-        self.file_label.grid(row=2, column=0, columnspan=2, pady=(0, 20))
 
-        self.upload_btn = ctk.CTkButton(self.upload_card, text="Sign, Encrypt & Upload", command=self.action_upload, state="disabled")
+        self.file_label = ctk.CTkLabel(self.card, text="No file selected", text_color="gray")
+        self.file_label.grid(row=2, column=0, columnspan=2, pady=(0, 10))
+
+        self.upload_btn = ctk.CTkButton(self.card, text="Encrypt & Upload", command=self.action_upload, state="disabled")
         self.upload_btn.grid(row=3, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="ew")
 
-        # Log Console
-        self.log_box = ctk.CTkTextbox(self.main_frame, font=ctk.CTkFont(family="Consolas", size=12), fg_color="#0f172a", text_color="#38bdf8")
-        self.log_box.grid(row=2, column=0, sticky="nsew")
-        self.append_log("System Boot: Security Kernel Ready.", "INFO")
+    # ---------------- Logs Tab ---------------- #
 
-    # --- ACTIONS & CALLBACKS ---
+    def _build_logs_tab(self):
+        self.logs_tab.grid_columnconfigure(0, weight=1)
+        self.logs_tab.grid_rowconfigure(0, weight=1)
+
+        self.log_box = ctk.CTkTextbox(
+            self.logs_tab,
+            font=ctk.CTkFont(family="Consolas", size=12),
+            fg_color="#0f172a",
+            text_color="#38bdf8"
+        )
+        self.log_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.log_box.configure(state="disabled")
+
+        self._write_log("System Boot: Security Kernel Ready.\n")
+
+    # ---------------- Settings Tab ---------------- #
+
+    def _build_settings_tab(self):
+        self.settings_tab.grid_columnconfigure(0, weight=1)
+
+        self.settings_header = ctk.CTkLabel(
+            self.settings_tab,
+            text="Preferences",
+            font=ctk.CTkFont(size=22, weight="bold")
+        )
+        self.settings_header.grid(row=0, column=0, sticky="w", pady=(10, 20))
+
+        self.theme_switch = ctk.CTkSwitch(self.settings_tab, text="Dark Mode", command=self.toggle_theme)
+        self.theme_switch.select()
+        self.theme_switch.grid(row=1, column=0, sticky="w", pady=10)
+
+        self.password_btn = ctk.CTkButton(self.settings_tab, text="Change Password", command=self.trigger_password_change)
+        self.password_btn.grid(row=2, column=0, sticky="w", pady=10)
+
+    # ---------------- Callbacks ---------------- #
+
+    def toggle_theme(self):
+        mode = "dark" if self.theme_switch.get() else "light"
+        ctk.set_appearance_mode(mode)
+
     def set_connection_status(self, connected: bool):
         if connected:
-            self.status_label.configure(text="🟢 SECURE", text_color="#10b981")
-            self.connect_btn.configure(state="disabled", text="Session Active")
-            self._check_upload_state()
+            self.status_label.configure(text="● Secure", text_color="#10b981")
+            self.connect_btn.configure(state="disabled", text="Connected")
         else:
-            self.status_label.configure(text="⚫ Disconnected", text_color="#ef4444")
-            self.connect_btn.configure(state="normal", text="Initiate Handshake")
+            self.status_label.configure(text="● Disconnected", text_color="#ef4444")
+            self.connect_btn.configure(state="normal", text="Connect")
+        self._check_upload_state()
 
     def append_log(self, text: str, level: str = "INFO"):
-        """Writes a log entry to a log file with color coding based on level."""
-        with open("doctor_app.log", "a") as log_book:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-            log_entry = f"[{timestamp}] [{level}] {text}\n"
-            log_book.write(log_entry)
-        log_book.close()
+        timestamp = time.strftime("%H:%M:%S")
+        formatted = f"[{timestamp}] [{level}] {text}\n"
+        with open("doctor_app.log", "a") as f:
+            f.write(formatted)
+        self._write_log(formatted)
 
-    def _write_log(self, text):
+    def _write_log(self, text, *_):
+        self.log_box.configure(state="normal")
         self.log_box.insert("end", text)
+        self.log_box.configure(state="disabled")
         self.log_box.see("end")
 
     def action_connect(self):
-        self.connect_btn.configure(state="disabled", text="Connecting...")
+        self.connect_btn.configure(text="Connecting...", state="disabled")
         self.agent.initiate_handshake()
 
     def action_select_file(self):
-        filepath = filedialog.askopenfilename(title="Select Medical Record")
-        if filepath:
-            self.selected_file_path = filepath
-            self.file_label.configure(text=os.path.basename(filepath), text_color="white")
+        path = filedialog.askopenfilename(title="Select Medical Record")
+        if path:
+            self.selected_file_path = path
+            self.file_label.configure(text=os.path.basename(path), text_color="white")
             self._check_upload_state()
 
     def _check_upload_state(self):
@@ -126,16 +204,16 @@ class VaultQDoctorApp(ctk.CTk):
 
     def action_upload(self):
         try:
-            # Validate using Pydantic
             form = UploadForm(patient_id=self.patient_id_entry.get(), filepath=self.selected_file_path)
-            self.upload_btn.configure(state="disabled") # Prevent double click
+            self.upload_btn.configure(state="disabled", text="Uploading...")
             self.agent.process_and_upload(form)
-            # Reset UI
             self.selected_file_path = None
             self.file_label.configure(text="No file selected", text_color="gray")
             self.patient_id_entry.delete(0, 'end')
+            self.upload_btn.configure(text="Encrypt & Upload")
         except Exception as e:
-            self.append_log(f"Validation Error: {e}", "ERROR")
+            self.append_log(f"Upload Error: {e}", "ERROR")
+            self.upload_btn.configure(text="Encrypt & Upload")
 
     def trigger_password_change(self):
         old_p = ctk.CTkInputDialog(text="Enter Old Password:", title="Security").get_input()
@@ -143,15 +221,14 @@ class VaultQDoctorApp(ctk.CTk):
 
         if old_p and new_p:
             try:
-                # 1. Update the Server first
-                resp = requests.post(f"{config.server_url}/api/auth/change-password", 
-                                     json={"doctor_id": self.doctor_id, "old_pass": old_p, "new_pass": new_p})
-                
+                resp = requests.post(
+                    f"{config.server_url}/api/auth/change-password",
+                    json={"doctor_id": self.doctor_id, "old_pass": old_p, "new_pass": new_p}
+                )
                 if resp.status_code == 200:
-                    # 2. Update the Local Vault (CRITICAL: If this fails, the local key is lost!)
                     self.agent.vault.change_password(self.doctor_id, old_p, new_p)
-                    messagebox.showinfo("Success", "Password changed everywhere!")
+                    messagebox.showinfo("Success", "Password changed successfully.")
                 else:
                     messagebox.showerror("Error", "Server rejected the change.")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to sync password: {str(e)}")
+                messagebox.showerror("Error", f"Failed to sync password: {e}")

@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 import os
 
 # 1. Import the missing admin_api
-from .routers import handshake_api, doctor_api, admin_api
+from .routers import handshake_api, doctor_api, admin_api, auth_api
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "ui", "templates")
@@ -14,6 +14,7 @@ app = FastAPI(title="VaultQ Core Server")
 app.include_router(handshake_api.router)
 app.include_router(doctor_api.router)
 app.include_router(admin_api.router) 
+app.include_router(auth_api.router)
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard():

@@ -7,11 +7,14 @@ from ..core.database import db, DoctorRecord, CertRecord
 from ..core.server_state import state
 from security_suite.security.certificates import CertificateAuthority
 
+import secrets
+import string
+
 router = APIRouter(prefix="/api/admin", tags=["Admin Control"])
 
 class OnboardRequest(BaseModel):
-    name: str
-    specialty: str
+    id: str
+    name: str = "Unknown Doctor"
     pqc_public_key_b64: str
 
 class StatusUpdateRequest(BaseModel):
@@ -32,46 +35,60 @@ def list_doctors():
     return db.get_all_doctors()
 
 @router.post("/doctors/onboard")
-def onboard_doctor(req: OnboardRequest):
-    """Registers a doctor and their PQC public key (Pending Status)"""
-    new_doc = DoctorRecord(
-        name=req.name, 
-        specialty=req.specialty, 
-        pqc_public_key_b64=req.pqc_public_key_b64
-    )
-    db.add_doctor(new_doc)
-    return {"message": "Doctor registered successfully", "doctor": new_doc}
+def onboard_doctor(payload: OnboardRequest):
+    """Receives the generated ML-DSA public key from the Doctor App."""
+    
+    # Use .get() to safely access the dictionary
+    doc = db.doctors.get(payload.id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Doctor ID not provisioned.")
+    
+    # Save the public key to the doctor's record
+    doc['pqc_public_key_b64'] = payload.pqc_public_key_b64
+    
+    # Save immediately to hospital_vault.json
+    db.save_db()
+    
+    return {"message": "PQC Key enrolled successfully"}
 
 @router.post("/doctors/{doctor_id}/issue-cert")
 def issue_certificate(doctor_id: str):
     """Hospital acts as CA: Issues an X.509 cert to the Doctor."""
-    doc = db.doctors.get(doctor_id)
+    doc = db.doctors.get(doctor_id) # Fetches the dict
     if not doc:
         raise HTTPException(status_code=404, detail="Doctor not found")
-        
-    pk_bytes = base64.b64decode(doc.pqc_public_key_b64)
     
-    # Generate the standard X.509 Certificate using security_suite
-    cert = CertificateAuthority.generate_doctor_certificate(
-        doctor_public_key_bytes=pk_bytes,
-        doctor_details={"name": doc.name, "doctor_id": doc.id},
-        issuer_key=state.hospital_ca,
-        issuer_cert=state.hospital_root_cert
-    )
-    
-    # Export to PEM format for distribution
-    pem_data = cert.public_bytes(serialization.Encoding.PEM).decode()
-    
-    # Save to DB
-    record = CertRecord(
-        doctor_id=doc.id, 
-        pem_data=pem_data,
-        expires_at=int(cert.not_valid_after.timestamp())
-    )
-    db.save_certificate(record)
-    
-    return {"message": "Certificate Issued", "cert_id": record.cert_id, "status": doc.status}
+    # Check if the doctor has actually performed the PQC enrollment
+    pqc_pub_key = doc.get('pqc_public_key_b64')
+    if not pqc_pub_key:
+        raise HTTPException(
+            status_code=400, 
+            detail="Doctor has not enrolled. They must log in to the Doctor App first."
+        )
 
+    try:
+        # Use bracket notation for dict access
+        pk_bytes = base64.b64decode(pqc_pub_key)
+        
+        cert = CertificateAuthority.generate_doctor_certificate(
+            doctor_public_key_bytes=pk_bytes,
+            doctor_details={"name": doc['name'], "doctor_id": doc['id']},
+            issuer_key=state.hospital_ca,
+            issuer_cert=state.hospital_root_cert
+        )
+        
+        pem_data = cert.public_bytes(serialization.Encoding.PEM).decode()
+        
+        # Save certificate and update status
+        db.save_certificate_record(doc['id'], pem_data, cert.not_valid_after.timestamp())
+        doc['status'] = 'active'
+        db.save_db() # Persist changes immediately
+        
+        return {"message": "Certificate Issued", "status": "active"}
+    except Exception as e:
+        print(f"Cert Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate PQC Certificate")
+    
 @router.put("/doctors/{doctor_id}/status")
 def update_status(doctor_id: str, req: StatusUpdateRequest):
     """RBAC Control: Revoke or suspend doctors."""
@@ -82,7 +99,19 @@ def update_status(doctor_id: str, req: StatusUpdateRequest):
 
 @router.delete("/doctors/{doctor_id}")
 def delete_doctor(doctor_id: str):
+    """Deletes the doctor and forces a database save."""
     success = db.delete_doctor(doctor_id)
     if not success:
         raise HTTPException(status_code=404, detail="Doctor not found")
-    return {"message": f"Doctor {doctor_id} has been wiped from the system."}
+    return {"message": "Doctor deleted successfully"}
+
+@router.post("/doctors/provision")
+def provision_doctor(name: str):
+    """Generates random credentials and saves them to the persistent JSON."""
+    doc_id = "doc_" + secrets.token_hex(3)
+    temp_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
+    
+    # This method must call db.save_db() internally to reflect on disk immediately
+    db.add_pre_authorized_doctor(doc_id, name, temp_pass)
+    
+    return {"id": doc_id, "password": temp_pass}

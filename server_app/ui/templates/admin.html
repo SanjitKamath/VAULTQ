@@ -7,9 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/alpinejs" defer></script>
 </head>
-<body class="bg-slate-950 text-slate-200 font-sans antialiased" x-data="adminApp()">
+<body class="bg-slate-950 text-slate-200 font-sans antialiased">
 
-    <div class="min-h-screen flex flex-col">
+    <div class="min-h-screen flex flex-col" x-data="adminApp()">
         <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
             <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
@@ -25,73 +25,80 @@
             </div>
         </header>
 
-        <main class="flex-1 p-8 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            <div class="col-span-1 space-y-8">
-                <section class="bg-slate-900 rounded-xl p-6 border border-slate-800 shadow-xl">
-                    <h2 class="text-lg font-medium text-white mb-4">Certificate Authority</h2>
-                    <div class="space-y-4">
-                        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                            <p class="text-xs text-slate-500 uppercase tracking-wider mb-1">Root Key Algorithm</p>
-                            <p class="font-mono text-cyan-400" x-text="stats.ca_algorithm">Loading...</p>
+        <main class="max-w-6xl mx-auto p-6 w-full">
+            <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
+                <h3 class="text-xl font-bold mb-4 text-cyan-400">Provision New Doctor</h3>
+                <p class="text-gray-400 text-sm mb-4">Enter the doctor's name to generate their initial VaultQ credentials.</p>
+                
+                <div class="flex gap-4">
+                    <input type="text" x-model="newDocName" placeholder="Doctor's Full Name" 
+                        class="bg-black border border-gray-700 p-3 rounded-lg flex-1 text-white focus:border-cyan-500 outline-none">
+                    <button @click="provisionDoctor()" 
+                            class="bg-cyan-600 px-8 py-3 rounded-lg font-bold hover:bg-cyan-500 transition-all">
+                        Generate Credentials
+                    </button>
+                </div>
+
+                <div x-show="lastProvisioned" x-transition class="mt-6 p-4 bg-cyan-900/20 border border-cyan-500/50 rounded-lg">
+                    <h4 class="font-bold text-cyan-300 mb-2">Credentials Created Successfully!</h4>
+                    <p class="text-sm text-gray-300 mb-2">Provide these to the doctor for their first-time enrollment:</p>
+                    <div class="grid grid-cols-2 gap-4 bg-black p-3 rounded border border-gray-800">
+                        <div>
+                            <span class="text-xs text-gray-500 block uppercase">Doctor ID</span>
+                            <span class="font-mono text-lg text-white" x-text="lastProvisioned?.id"></span>
                         </div>
-                        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 flex justify-between items-center">
-                            <div>
-                                <p class="text-xs text-slate-500 uppercase tracking-wider mb-1">Active Certificates</p>
-                                <p class="text-2xl font-light text-white" x-text="stats.active_certs">0</p>
-                            </div>
-                            <div>
-                                <p class="text-xs text-slate-500 uppercase tracking-wider mb-1">Total Doctors</p>
-                                <p class="text-2xl font-light text-white" x-text="stats.total_doctors">0</p>
-                            </div>
+                        <div>
+                            <span class="text-xs text-gray-500 block uppercase">Temporary Password</span>
+                            <span class="font-mono text-lg text-yellow-400" x-text="lastProvisioned?.password"></span>
                         </div>
                     </div>
-                </section>
+                </div>
             </div>
 
-            <div class="col-span-1 lg:col-span-2 space-y-8">
-                <section class="bg-slate-900 rounded-xl p-6 border border-slate-800 shadow-xl">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-lg font-medium text-white">Doctor RBAC & Onboarding</h2>
-                        
-                        <button @click="mockOnboard()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium transition shadow-lg shadow-indigo-500/20">
-                            + Simulate Doctor Registration
-                        </button>
-                    </div>
-
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="border-b border-slate-800 text-sm text-slate-400">
-                                    <th class="py-3 px-4 font-medium">Doctor Name</th>
-                                    <th class="py-3 px-4 font-medium">Specialty</th>
-                                    <th class="py-3 px-4 font-medium">Status</th>
-                                    <th class="py-3 px-4 font-medium text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody class="text-sm">
-                                <template x-for="doc in doctors" :key="doc.id">
-                                    <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
-                                        <td class="py-4 px-4 font-medium text-white" x-text="doc.name"></td>
-                                        <td class="py-4 px-4 text-slate-400" x-text="doc.specialty"></td>
-                                        <td class="py-4 px-4">
-                                            <span x-show="doc.status === 'active'" class="px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded text-xs border border-emerald-500/20">Active</span>
-                                            <span x-show="doc.status === 'pending'" class="px-2 py-1 bg-amber-500/10 text-amber-400 rounded text-xs border border-amber-500/20">Pending Cert</span>
-                                            <span x-show="doc.status === 'revoked'" class="px-2 py-1 bg-red-500/10 text-red-400 rounded text-xs border border-red-500/20">Revoked</span>
-                                        </td>
-                                        <td class="py-4 px-4 text-right space-x-2">
-                                            <button x-show="doc.status === 'pending'" @click="issueCert(doc.id)" class="text-xs text-cyan-400 hover:text-cyan-300">Issue CA Cert</button>
-                                            <button x-show="doc.status === 'active'" @click="revokeAccess(doc.id)" class="text-xs text-red-400 hover:text-red-300">Revoke</button>
-                                        </td>
-                                    </tr>
-                                    <button @click="confirmDelete(doc.id)" class="text-xs text-red-500 hover:text-red-700 font-bold ml-4">
+            <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
+                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                    <h2 class="text-xl font-bold">Authorized Personnel</h2>
+                    <button @click="refresh()" class="text-sm text-cyan-500 hover:underline">↻ Refresh List</button>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
+                        <tr>
+                            <th class="py-4 px-4">Doctor ID</th>
+                            <th class="py-4 px-4">Name</th>
+                            <th class="py-4 px-4">Status</th>
+                            <th class="py-4 px-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="doc in doctors" :key="doc.id">
+                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
+                                <td class="py-4 px-4 font-mono text-cyan-400" x-text="doc.id"></td>
+                                <td class="py-4 px-4 font-bold" x-text="doc.name"></td>
+                                <td class="py-4 px-4">
+                                    <span x-text="doc.status" 
+                                        :class="doc.status === 'active' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'"
+                                        class="px-2 py-1 rounded text-xs uppercase font-bold">
+                                    </span>
+                                </td>
+                                <td class="py-4 px-4 text-right">
+                                    <button x-show="doc.status !== 'active'" @click="issueCert(doc.id)" 
+                                            class="text-xs px-3 py-1 rounded font-bold mr-2 transition-all"
+                                            :class="!doc.pqc_public_key_b64 ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500'"
+                                            :title="!doc.pqc_public_key_b64 ? 'Doctor must log in to the app first to enroll keys' : 'Issue Certificate'">
+                                        ISSUE CA CERT
+                                    </button>
+                                    <button @click="deleteDoctor(doc.id)" 
+                                            class="text-xs text-red-500 hover:text-red-400 font-bold">
                                         DELETE
                                     </button>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr x-show="doctors.length === 0">
+                            <td colspan="4" class="py-12 text-center text-slate-500 italic">No doctors provisioned yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </main>
     </div>
@@ -101,71 +108,72 @@
             return {
                 stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, ca_algorithm: '...' },
                 doctors: [],
+                newDocName: '',        
+                lastProvisioned: null, 
 
                 init() {
-                    this.fetchStats();
-                    this.fetchDoctors();
-                },
-
-                async fetchStats() {
-                    const res = await fetch('/api/admin/stats');
-                    this.stats = await res.json();
-                },
-
-                async fetchDoctors() {
-                    const res = await fetch('/api/admin/doctors');
-                    this.doctors = await res.json();
-                },
-
-                async issueCert(doctorId) {
-                    await fetch(`/api/admin/doctors/${doctorId}/issue-cert`, { method: 'POST' });
                     this.refresh();
                 },
 
-                async revokeAccess(doctorId) {
-                    await fetch(`/api/admin/doctors/${doctorId}/status`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ status: 'revoked' })
-                    });
-                    this.refresh();
-                },
-
-                async mockOnboard() {
-                    // Ask the admin for a real name instead of random gibberish
-                    const docName = prompt("Enter the Doctor's Name:", "Dr. Sanjit Kamath");
-                    if (!docName) return; 
-
-                    const docSpecialty = prompt("Enter Specialty:", "Neurology");
-
-                    await fetch('/api/admin/doctors/onboard', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            name: docName,
-                            specialty: docSpecialty,
-                            pqc_public_key_b64: 'bW9jay1wcWMtcHVibGljLWtleS1ieXRlcw==' // Still a mock key for now
-                        })
-                    });
-                    this.refresh();
-                },
-                async confirmDelete(docId) {
-                    if (confirm(`Are you sure you want to permanently delete ${docId}? This cannot be undone.`)) {
-                        try {
-                            const resp = await fetch(`/api/admin/doctors/${docId}`, { method: 'DELETE' });
-                            if (resp.ok) {
-                                alert("Doctor deleted successfully.");
-                                this.refresh(); // Reload the list
-                            }
-                        } catch (e) {
-                            alert("Failed to delete doctor.");
-                        }
+                async refresh() {
+                    try {
+                        const [statsRes, docsRes] = await Promise.all([
+                            fetch('/api/admin/stats'),
+                            fetch('/api/admin/doctors')
+                        ]);
+                        this.stats = await statsRes.json();
+                        this.doctors = await docsRes.json();
+                    } catch (e) {
+                        console.error("Failed to refresh dashboard:", e);
                     }
                 },
 
-                refresh() {
-                    this.fetchStats();
-                    this.fetchDoctors();
+                async provisionDoctor() {
+                    if (!this.newDocName) return;
+                    
+                    try {
+                        const resp = await fetch(`/api/admin/doctors/provision?name=${encodeURIComponent(this.newDocName)}`, { 
+                            method: 'POST' 
+                        });
+                        
+                        if (resp.ok) {
+                            this.lastProvisioned = await resp.json();
+                            this.newDocName = '';
+                            await this.refresh(); 
+                        } else {
+                            alert("Server Error: Could not provision doctor.");
+                        }
+                    } catch (e) {
+                        alert("Network error: " + e.message);
+                    }
+                },
+
+                async issueCert(doctorId) {
+                    try {
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/issue-cert`, { method: 'POST' });
+                        if (resp.ok) {
+                            await this.refresh(); // Immediate UI update
+                        } else if (resp.status === 400) {
+                            // Safely catch the exact error we wrote in the backend
+                            const errorData = await resp.json();
+                            alert("Cannot Issue Certificate:\n" + errorData.detail);
+                        } else {
+                            alert("An unexpected error occurred while issuing the certificate.");
+                        }
+                    } catch (e) {
+                        console.error("Failed to issue cert:", e);
+                    }
+                },
+
+                async deleteDoctor(id) {
+                    if (confirm(`Permanently revoke access for ${id}? This will wipe their certificates and access rights.`)) {
+                        const resp = await fetch(`/api/admin/doctors/${id}`, { method: 'DELETE' });
+                        if (resp.ok) {
+                            await this.refresh(); 
+                        } else {
+                            alert("Failed to delete doctor.");
+                        }
+                    }
                 }
             }
         }
