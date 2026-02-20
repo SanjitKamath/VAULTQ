@@ -6,6 +6,9 @@ from core.models import UploadForm
 from core.security_agent import SecurityAgent
 import requests
 import time
+import queue
+import tkinter as tk
+from PIL import ImageGrab, ImageTk
 
 # --- App Theme ---
 ctk.set_appearance_mode("dark")
@@ -14,36 +17,40 @@ ctk.set_widget_scaling(1.1)
 ctk.set_window_scaling(1.1)
 
 
-class VaultQDoctorApp(ctk.CTk):
+def theme_color(light, dark):
+    return (light, dark)
+
+
+class VaultQDoctorApp(ctk.CTkToplevel):
     def __init__(self, doctor_id: str, private_key: bytes):
         super().__init__()
 
-        self.title(f"VaultQ – Doctor Portal")
+        self.title("VaultQ – Doctor Portal")
         self.minsize(900, 600)
         self.geometry("1000x650")
 
         self.doctor_id = doctor_id
         self.selected_file_path = None
+        self._closing = False
+
+        # Thread-safe UI queue
+        self._ui_queue = queue.Queue()
 
         self._center_window()
         self._build_ui()
 
-        self.append_log = self._write_log
+        self.append_log = self._thread_safe_log
 
         self.agent = SecurityAgent(
             log_callback=self.append_log,
-            status_callback=self.set_connection_status,
-            loaded_private_key=private_key
-        )
-        
-        self.agent = SecurityAgent(
-            log_callback=self.append_log, 
-            status_callback=self.set_connection_status,
+            status_callback=lambda connected: self._ui_queue.put(("status", connected)),
             loaded_private_key=private_key,
-            doctor_id=doctor_id # Pass the ID here
+            doctor_id=doctor_id
         )
 
+        self.after(50, self._process_ui_queue)
         self.after(800, self._auto_handshake)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ---------------- UI ---------------- #
 
@@ -59,7 +66,10 @@ class VaultQDoctorApp(ctk.CTk):
         self.grid_rowconfigure(1, weight=1)
 
         # --- Top Bar ---
-        self.top_bar = ctk.CTkFrame(self, height=60, corner_radius=0)
+        self.top_bar = ctk.CTkFrame(
+            self, height=60, corner_radius=0,
+            fg_color=theme_color("#f8fafc", "#0f172a")
+        )
         self.top_bar.grid(row=0, column=0, sticky="nsew")
         self.top_bar.grid_columnconfigure(1, weight=1)
 
@@ -100,11 +110,22 @@ class VaultQDoctorApp(ctk.CTk):
         )
         self.header.grid(row=0, column=0, sticky="w", pady=(10, 20))
 
-        self.card = ctk.CTkFrame(self.upload_tab, corner_radius=16)
+        self.card = ctk.CTkFrame(
+            self.upload_tab,
+            corner_radius=16,
+            fg_color=theme_color("#ffffff", "#0f172a"),
+            border_width=1,
+            border_color=theme_color("#e5e7eb", "#1e293b")
+        )
         self.card.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
         self.card.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(self.card, text="Patient ID").grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
+        ctk.CTkLabel(
+            self.card,
+            text="Patient ID",
+            text_color=theme_color("#0f172a", "#e5e7eb")
+        ).grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
+
         self.patient_id_entry = ctk.CTkEntry(self.card, placeholder_text="PAT-8821")
         self.patient_id_entry.grid(row=0, column=1, padx=20, pady=(20, 10), sticky="ew")
 
@@ -117,7 +138,11 @@ class VaultQDoctorApp(ctk.CTk):
         )
         self.file_btn.grid(row=1, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
 
-        self.file_label = ctk.CTkLabel(self.card, text="No file selected", text_color="gray")
+        self.file_label = ctk.CTkLabel(
+            self.card,
+            text="No file selected",
+            text_color=theme_color("#475569", "#e5e7eb")
+        )
         self.file_label.grid(row=2, column=0, columnspan=2, pady=(0, 10))
 
         self.upload_btn = ctk.CTkButton(self.card, text="Encrypt & Upload", command=self.action_upload, state="disabled")
@@ -132,8 +157,10 @@ class VaultQDoctorApp(ctk.CTk):
         self.log_box = ctk.CTkTextbox(
             self.logs_tab,
             font=ctk.CTkFont(family="Consolas", size=12),
-            fg_color="#0f172a",
-            text_color="#38bdf8"
+            fg_color=theme_color("#f1f5f9", "#0f172a"),
+            text_color=theme_color("#0f172a", "#38bdf8"),
+            border_width=1,
+            border_color=theme_color("#e5e7eb", "#1e293b")
         )
         self.log_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         self.log_box.configure(state="disabled")
@@ -156,14 +183,13 @@ class VaultQDoctorApp(ctk.CTk):
         self.theme_switch.select()
         self.theme_switch.grid(row=1, column=0, sticky="w", pady=10)
 
-        self.password_btn = ctk.CTkButton(self.settings_tab, text="Change Password", command=self.trigger_password_change)
-        self.password_btn.grid(row=2, column=0, sticky="w", pady=10)
-
     # ---------------- Callbacks ---------------- #
 
     def toggle_theme(self):
         mode = "dark" if self.theme_switch.get() else "light"
         ctk.set_appearance_mode(mode)
+
+    # ---------------- Logic ---------------- #
 
     def set_connection_status(self, connected: bool):
         if connected:
@@ -173,13 +199,6 @@ class VaultQDoctorApp(ctk.CTk):
             self.status_label.configure(text="● Disconnected", text_color="#ef4444")
             self.connect_btn.configure(state="normal", text="Connect")
         self._check_upload_state()
-
-    def append_log(self, text: str, level: str = "INFO"):
-        timestamp = time.strftime("%H:%M:%S")
-        formatted = f"[{timestamp}] [{level}] {text}\n"
-        with open("doctor_app.log", "a") as f:
-            f.write(formatted)
-        self._write_log(formatted)
 
     def _write_log(self, text, *_):
         self.log_box.configure(state="normal")
@@ -217,24 +236,49 @@ class VaultQDoctorApp(ctk.CTk):
             self.append_log(f"Upload Error: {e}", "ERROR")
             self.upload_btn.configure(text="Encrypt & Upload")
 
-    def trigger_password_change(self):
-        old_p = ctk.CTkInputDialog(text="Enter Old Password:", title="Security").get_input()
-        new_p = ctk.CTkInputDialog(text="Enter New Password:", title="Security").get_input()
-
-        if old_p and new_p:
-            try:
-                resp = requests.post(
-                    f"{config.server_url}/api/auth/change-password",
-                    json={"doctor_id": self.doctor_id, "old_pass": old_p, "new_pass": new_p}
-                )
-                if resp.status_code == 200:
-                    self.agent.vault.change_password(self.doctor_id, old_p, new_p)
-                    messagebox.showinfo("Success", "Password changed successfully.")
-                else:
-                    messagebox.showerror("Error", "Server rejected the change.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to sync password: {e}")
 
     def _auto_handshake(self):
         self.append_log("Auto-initiating secure handshake...", "INFO")
         self.action_connect()
+
+    # ---------------- Thread-safe UI bridge ---------------- #
+
+    def _thread_safe_log(self, text: str, level: str = "INFO"):
+        self._ui_queue.put(("log", text, level))
+
+    def _process_ui_queue(self):
+        try:
+            while True:
+                item = self._ui_queue.get_nowait()
+                kind = item[0]
+
+                if kind == "log":
+                    _, text, level = item
+                    timestamp = time.strftime("%H:%M:%S")
+                    formatted = f"[{timestamp}] [{level}] {text}\n"
+                    with open("doctor_app/doctor_app.log", "a") as f:
+                        f.write(formatted)
+                    self._write_log(formatted)
+
+                elif kind == "status":
+                    _, connected = item
+                    self.set_connection_status(connected)
+
+        except queue.Empty:
+            pass
+
+        if self.winfo_exists() and not self._closing:
+            self.after(50, self._process_ui_queue)
+
+    def _on_close(self):
+        self._closing = True
+
+        try:
+            # Tell your background agent to shut down cleanly
+            if hasattr(self.agent, "shutdown"):
+                self.agent.shutdown()
+        except Exception:
+            pass
+
+        self.quit()     # stops Tk mainloop
+        self.destroy()
