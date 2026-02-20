@@ -24,5 +24,6 @@ class SecureEnvelope(BaseModel):
     kid: str                # ID of the key used to sign/encrypt
     nonce: str              # Anti-replay
     timestamp: int          # Validity window check
+    patient_id: str         # For routing and access control
     payload: str            # AES Encrypted Data (Base64)
     signature: str          # ML-DSA Signature of (payload + header)
