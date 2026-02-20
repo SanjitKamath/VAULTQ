@@ -43,6 +43,8 @@ class VaultQDoctorApp(ctk.CTk):
             doctor_id=doctor_id # Pass the ID here
         )
 
+        self.after(800, self._auto_handshake)
+
     # ---------------- UI ---------------- #
 
     def _center_window(self):
@@ -232,3 +234,7 @@ class VaultQDoctorApp(ctk.CTk):
                     messagebox.showerror("Error", "Server rejected the change.")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to sync password: {e}")
+
+    def _auto_handshake(self):
+        self.append_log("Auto-initiating secure handshake...", "INFO")
+        self.action_connect()
