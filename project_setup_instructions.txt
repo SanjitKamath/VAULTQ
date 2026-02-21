@@ -1,0 +1,155 @@
+============================================================
+VaultQ Setup + Developer Instructions (Clean Version)
+============================================================
+
+1) PREREQUISITES
+------------------------------------------------------------
+Install these once:
+
+- Python 3.11 (recommended)
+- Git
+- (Windows) Visual C++ Build Tools
+  Required if bcrypt / cryptography wheels need to be built
+
+
+2) CLONE AND CREATE VIRTUAL ENVIRONMENT
+------------------------------------------------------------
+From repo root (VAULTQ_Backup):
+
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  python -m pip install --upgrade pip
+  pip install -r security_suite\requirements_security.txt
+  pip install -r server_app\requirements_server.txt
+  pip install -r doctor_app\requirements_doctor.txt
+
+
+3) ENVIRONMENT SETUP (IMPORTANT)
+------------------------------------------------------------
+Create .env from .env.sample and set values:
+
+  VAULTQ_ADMIN_TOKEN = long random secret
+  VAULTQ_ALLOW_INSECURE_DEV = 1   (local non-TLS dev only)
+                             0   (secure/TLS mode)
+
+PowerShell example for current terminal session:
+
+  Get-Content .env | ForEach-Object {
+    if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+    $name, $value = $_ -split '=', 2
+    Set-Item -Path "Env:$name" -Value $value
+  }
+
+NOTE:
+- The code does NOT auto-load .env.
+- Variables must be exported in the shell or configured in your IDE run config.
+
+SECURITY NOTE:
+- Your checked-in .env currently contains a real token.
+- Rotate it immediately.
+- Keep only .env.sample in version control.
+
+
+4) RUN THE SYSTEM
+------------------------------------------------------------
+Open two terminals.
+Both must have:
+- virtual environment activated
+- environment variables loaded
+
+Start server:
+
+  python -m server_app.main
+
+Start doctor desktop app:
+
+  python -m doctor_app.main
+
+Admin UI:
+
+  Dev mode (no TLS):
+    http://127.0.0.1:8080/admin
+
+  Full TLS mode:
+    https://127.0.0.1:8443/admin
+
+
+5) FIRST-TIME ONBOARDING FLOW
+------------------------------------------------------------
+1. In Admin UI:
+   - Provision doctor (name)
+   - Receive doctor_id + temporary password
+
+2. Doctor:
+   - Logs in via desktop app
+   - App generates PQC + TLS keys
+   - Public keys are auto-enrolled with server
+
+3. Admin:
+   - Click "ISSUE CA CERT" for that doctor
+
+4. Doctor app:
+   - Auto-polls server
+   - Downloads certificate
+   - Secure upload is now enabled
+
+
+6) TLS ARTIFACT EXPECTATIONS
+------------------------------------------------------------
+Server secure mode requires:
+
+  - server.crt
+  - server.key
+  - hospital_root_ca.pem   (auto-bootstrapped root CA)
+
+Doctor app expects:
+
+  - doctor_cert.pem       (downloaded after cert issue)
+  - doctor_container.key (generated on onboarding)
+  - hospital_root_ca.pem (copied from server CA file)
+
+If these are missing:
+  - Use dev mode:
+      VAULTQ_ALLOW_INSECURE_DEV = 1
+
+
+7) WHERE IMPORTANT DATA IS STORED
+------------------------------------------------------------
+- Doctor / cert registry:
+    hospital_vault.json
+
+- Server master key:
+    master_key.json
+
+- Patient encrypted records:
+    server_app/storage/vault/<patient_id>/
+
+- Doctor local identity vault:
+    doctor_app/storage/
+
+
+8) DEVELOPMENT WORKFLOW FOR IMPROVEMENTS
+------------------------------------------------------------
+General workflow:
+
+- Work in one shared virtual environment from repo root
+- Start server + doctor app together for end-to-end changes
+
+Crypto / security logic changes:
+
+  Touch only:
+    - security_suite/crypto/*
+    - security_suite/security/*
+    - server_app/core/*
+    - server_app/routers/*
+
+UX-only changes:
+
+  Focus on:
+    - doctor_app/ui/*
+    - admin.html
+
+
+============================================================
+End of VaultQ Developer Setup Guide
+============================================================
