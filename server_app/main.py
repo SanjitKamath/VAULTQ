@@ -8,6 +8,7 @@ from .core.ca_setup import ensure_server_tls_artifacts
 
 app = FastAPI(title="VaultQ Core Server")
 MAX_UPLOAD_BYTES = int(os.getenv("VAULTQ_MAX_UPLOAD_BYTES", "8388608"))  # 8 MiB default
+REQUIRE_MTLS = os.getenv("VAULTQ_REQUIRE_MTLS", "0") == "1"
 
 # Define template directory for the admin dashboard
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +55,7 @@ def admin_dashboard():
         return f.read()
 
 def start_secure_server():
-    """Starts the Uvicorn server with TLS enforced on port 8080."""
+    """Starts the Uvicorn server with TLS on port 8080, optional mTLS via env flag."""
     cert_dir = os.path.join(BASE_DIR, "storage", "certs")
     server_cert = os.path.join(cert_dir, "server.crt")
     server_key = os.path.join(cert_dir, "server.key")
@@ -77,7 +78,7 @@ def start_secure_server():
         ssl_certfile=server_cert,
         ssl_keyfile=server_key,
         ssl_ca_certs=root_ca,
-        ssl_cert_reqs=ssl.CERT_REQUIRED,
+        ssl_cert_reqs=ssl.CERT_REQUIRED if REQUIRE_MTLS else ssl.CERT_NONE,
     )
 
 if __name__ == "__main__":
