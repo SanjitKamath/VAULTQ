@@ -82,32 +82,9 @@
                                     </span>
                                 </td>
                                 <td class="py-4 px-4">
-                                    <div class="flex items-center gap-3">
-                                        <span
-                                            class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 
-                                                font-mono text-xs tracking-wider text-slate-300"
-                                            x-text="revealedPasswords[doc.id] ? revealedPasswords[doc.id] : '********'">
-                                        </span>
-
-                                        <button
-                                            @click="togglePassword(doc.id)"
-                                            class="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 transition-colors"
-                                            title="Reveal password"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
-                                                viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7
-                                                    -1.274 4.057-5.064 7-9.542 7
-                                                    -4.477 0-8.268-2.943-9.542-7z" />
-                                            </svg>
-                                            <span class="text-xs font-semibold">
-                                            <span x-text="revealedPasswords[doc.id] ? 'HIDE' : 'VIEW'"></span>
-                                            </span>
-                                        </button>
-                                    </div>
+                                    <span class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 font-mono text-xs tracking-wider text-slate-300">
+                                        HASHED ONLY
+                                    </span>
                                 </td>
                                 <td class="py-4 px-4 text-right">
                                     <button x-show="doc.status !== 'active'" @click="issueCert(doc.id)" 
@@ -119,6 +96,14 @@
                                     <button @click="updateDoctorPassword(doc.id)"
                                             class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
                                         CHANGE PASSWORD
+                                    </button>
+                                    <button @click="refreshCert(doc.id)"
+                                            class="text-xs text-cyan-400 hover:text-cyan-300 font-bold mr-2">
+                                        REFRESH CERT
+                                    </button>
+                                    <button @click="revokeCert(doc.id)"
+                                            class="text-xs text-orange-400 hover:text-orange-300 font-bold mr-2">
+                                        REVOKE CERT
                                     </button>
                                     <button @click="deleteDoctor(doc.id)" 
                                             class="text-xs text-red-500 hover:text-red-400 font-bold">
@@ -141,23 +126,33 @@
             return {
                 stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, ca_algorithm: '...' },
                 doctors: [],
-                revealedPasswords: {},
+                adminToken: localStorage.getItem('vaultq_admin_token') || '',
                 newDocName: '',        
                 lastProvisioned: null, 
 
                 init() {
+                    if (!this.adminToken) {
+                        const input = prompt("Enter admin token:");
+                        if (input) {
+                            this.adminToken = input.trim();
+                            localStorage.setItem('vaultq_admin_token', this.adminToken);
+                        }
+                    }
                     this.refresh();
+                },
+
+                authHeaders(extra = {}) {
+                    return { ...extra, 'x-admin-token': this.adminToken };
                 },
 
                 async refresh() {
                     try {
                         const [statsRes, docsRes] = await Promise.all([
-                            fetch('/api/admin/stats'),
-                            fetch('/api/admin/doctors')
+                            fetch('/api/admin/stats', { headers: this.authHeaders() }),
+                            fetch('/api/admin/doctors', { headers: this.authHeaders() }),
                         ]);
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
-                        this.revealedPasswords = {};
                     } catch (e) {
                         console.error("Failed to refresh dashboard:", e);
                     }
@@ -168,7 +163,8 @@
                     
                     try {
                         const resp = await fetch(`/api/admin/doctors/provision?name=${encodeURIComponent(this.newDocName)}`, { 
-                            method: 'POST' 
+                            method: 'POST',
+                            headers: this.authHeaders(),
                         });
                         
                         if (resp.ok) {
@@ -185,7 +181,10 @@
 
                 async issueCert(doctorId) {
                     try {
-                        const resp = await fetch(`/api/admin/doctors/${doctorId}/issue-cert`, { method: 'POST' });
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/issue-cert`, {
+                            method: 'POST',
+                            headers: this.authHeaders(),
+                        });
                         if (resp.ok) {
                             await this.refresh(); // Immediate UI update
                         } else if (resp.status === 400) {
@@ -200,26 +199,6 @@
                     }
                 },
 
-                async togglePassword(doctorId) {
-                    if (this.revealedPasswords[doctorId]) {
-                        delete this.revealedPasswords[doctorId];
-                        this.revealedPasswords = { ...this.revealedPasswords };
-                        return;
-                    }
-                    try {
-                        const resp = await fetch(`/api/admin/doctors/${doctorId}/password`);
-                        if (!resp.ok) {
-                            alert("Failed to load password.");
-                            return;
-                        }
-                        const data = await resp.json();
-                        this.revealedPasswords[doctorId] = data.password || '';
-                        this.revealedPasswords = { ...this.revealedPasswords };
-                    } catch (e) {
-                        alert("Network error while loading password.");
-                    }
-                },
-
                 async updateDoctorPassword(doctorId) {
                     const newPassword = prompt(`Enter a new password for ${doctorId}:`);
                     if (newPassword === null) return;
@@ -231,7 +210,7 @@
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/password`, {
                             method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: this.authHeaders({ 'Content-Type': 'application/json' }),
                             body: JSON.stringify({ password: newPassword.trim() })
                         });
                         if (!resp.ok) {
@@ -239,17 +218,56 @@
                             alert(errorData.detail || "Failed to update password.");
                             return;
                         }
-                        this.revealedPasswords[doctorId] = newPassword.trim();
-                        this.revealedPasswords = { ...this.revealedPasswords };
                         alert("Password updated successfully.");
                     } catch (e) {
                         alert("Network error while updating password.");
                     }
                 },
 
+                async refreshCert(doctorId) {
+                    if (!confirm(`Rotate certificate for ${doctorId}? Existing active certs will be revoked.`)) return;
+                    try {
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/refresh-cert`, {
+                            method: 'POST',
+                            headers: this.authHeaders(),
+                        });
+                        const body = await resp.json().catch(() => ({}));
+                        if (!resp.ok) {
+                            alert(body.detail || "Failed to refresh certificate.");
+                            return;
+                        }
+                        alert(`Certificate refreshed (revoked ${body.revoked_count || 0} old certs).`);
+                        await this.refresh();
+                    } catch (e) {
+                        alert("Network error while refreshing certificate.");
+                    }
+                },
+
+                async revokeCert(doctorId) {
+                    if (!confirm(`Revoke all active certificates for ${doctorId}?`)) return;
+                    try {
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/revoke-cert`, {
+                            method: 'POST',
+                            headers: this.authHeaders(),
+                        });
+                        const body = await resp.json().catch(() => ({}));
+                        if (!resp.ok) {
+                            alert(body.detail || "Failed to revoke certificate.");
+                            return;
+                        }
+                        alert(`Revoked ${body.revoked_count || 0} active certificate(s).`);
+                        await this.refresh();
+                    } catch (e) {
+                        alert("Network error while revoking certificate.");
+                    }
+                },
+
                 async deleteDoctor(id) {
                     if (confirm(`Permanently revoke access for ${id}? This will wipe their certificates and access rights.`)) {
-                        const resp = await fetch(`/api/admin/doctors/${id}`, { method: 'DELETE' });
+                        const resp = await fetch(`/api/admin/doctors/${id}`, {
+                            method: 'DELETE',
+                            headers: this.authHeaders(),
+                        });
                         if (resp.ok) {
                             await this.refresh(); 
                         } else {

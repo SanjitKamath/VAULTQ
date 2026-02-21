@@ -1,8 +1,12 @@
 import os
 import json
 import base64
-from fastapi import APIRouter, HTTPException
 import time
+from fastapi import APIRouter, HTTPException
+from cryptography.x509.oid import NameOID
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from security_suite.security.models import SecureEnvelope, StoredVaultEnvelope
 from security_suite.security.integrity import (
     sha256_hex,
@@ -10,10 +14,17 @@ from security_suite.security.integrity import (
     build_server_record_hash_message,
 )
 from security_suite.crypto import DSAManager
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from security_suite.security.certificates import (
+    load_pem_certificate,
+    extract_pqc_public_key_from_cert,
+    verify_cert_chain,
+)
+
 from ..core.database import db
 from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
+from ..core.auth_utils import verify_password, hash_password  # For secure bcrypt passwords
+from ..core.integrity_audit import append_integrity_event
 
 router = APIRouter(prefix="/api/doctor", tags=["Doctor Operations"])
 audit = get_audit_logger()
@@ -21,6 +32,8 @@ audit = get_audit_logger()
 # Create the secure storage directory
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "storage", "vault")
 os.makedirs(STORAGE_DIR, exist_ok=True)
+MAX_CLOCK_SKEW_SECONDS = 300
+REPLAY_CACHE_TTL_SECONDS = 900
 
 
 def _safe_path_component(value: str) -> str:
@@ -42,19 +55,13 @@ def _print_crypto_data(label: str, data: bytes):
 @router.post("/upload")
 def receive_record(envelope: SecureEnvelope):
     """
-    Verifies Signature, decrypts transport payload, re-encrypts with server master key,
-    and stores under patient-specific vault folder.
+    Verifies Signature, re-encrypts the Application-Layer payload with the server master key,
+    and stores under patient-specific vault folder. 
+    (Transport decryption is natively handled by mTLS).
     """
     # --- 1. AUTHORIZATION & CERTIFICATE VALIDATION ---
     doctor_id = envelope.kid
     audit.info("Upload received: doctor_id=%s timestamp=%s", doctor_id, envelope.timestamp)
-    audit.info(
-        "Doctor attestation packet received doctor_id=%s patient_id=%s payload_hash=%s signature_b64=%s",
-        envelope.kid,
-        envelope.patient_id,
-        envelope.payload_hash,
-        envelope.signature,
-    )
     
     # A. Check if the Doctor exists and is active
     doc = db.doctors.get(doctor_id)
@@ -67,7 +74,6 @@ def receive_record(envelope: SecureEnvelope):
         raise HTTPException(status_code=403, detail="Forbidden: Doctor has not been issued a valid certificate.")
 
     # B. Explicit Certificate Lookup
-    # Safely get all certificates belonging to this doctor
     doctor_certs = [cert for cert in getattr(db, 'certificates', {}).values() if cert.get('doctor_id') == doctor_id]
     
     if not doctor_certs:
@@ -85,32 +91,57 @@ def receive_record(envelope: SecureEnvelope):
     if not valid_cert:
         audit.warning("Upload rejected: no active/unexpired cert for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=403, detail="Forbidden: Certificate is expired or revoked.")
-    audit.info("Upload cert validation passed for doctor_id=%s", doctor_id)
 
-    # --- 2. AUTHENTICATION (SIGNATURE VERIFICATION) ---
-    doctor_pub_b64 = doc.get("pqc_public_key_b64")
-    if not doctor_pub_b64:
-        audit.warning("Upload rejected: missing enrolled PQC public key for doctor_id=%s", doctor_id)
-        raise HTTPException(status_code=401, detail="Missing doctor public key for signature verification.")
+    # --- 2. FRESHNESS + REPLAY CHECKS ---
+    if abs(int(current_time) - int(envelope.timestamp)) > MAX_CLOCK_SKEW_SECONDS:
+        audit.warning(
+            "Upload rejected: stale timestamp for doctor_id=%s timestamp=%s now=%s",
+            doctor_id,
+            envelope.timestamp,
+            int(current_time),
+        )
+        raise HTTPException(status_code=401, detail="Stale or invalid timestamp.")
+
+    message_id = f"{doctor_id}:{envelope.nonce}:{envelope.timestamp}"
+    if state.replay_seen_or_store(message_id, REPLAY_CACHE_TTL_SECONDS):
+        audit.warning("Upload rejected: replay detected for doctor_id=%s message_id=%s", doctor_id, message_id)
+        raise HTTPException(status_code=401, detail="Replay detected.")
+
+    # --- 2. AUTHENTICATION (APPLICATION-LAYER SIGNATURE VERIFICATION) ---
+    cert_pem = valid_cert.get("pem_data")
+    if not cert_pem:
+        raise HTTPException(status_code=403, detail="Forbidden: Missing certificate payload.")
 
     try:
+        cert_obj = load_pem_certificate(cert_pem)
+        if cert_obj.issuer != state.hospital_root_cert.subject:
+            raise HTTPException(status_code=403, detail="Certificate issuer mismatch.")
+
+        if not verify_cert_chain(cert_obj, state.hospital_root_cert):
+            raise HTTPException(status_code=403, detail="Unsupported issuer public key type.")
+        if cert_obj.not_valid_before.timestamp() > current_time or cert_obj.not_valid_after.timestamp() < current_time:
+            raise HTTPException(status_code=403, detail="Certificate validity window check failed.")
+
+        subject_ids = cert_obj.subject.get_attributes_for_oid(NameOID.USER_ID)
+        if not subject_ids or subject_ids[0].value != doctor_id:
+            raise HTTPException(status_code=403, detail="Certificate subject does not match doctor identity.")
+
+        cert_bound_doctor_pub = extract_pqc_public_key_from_cert(cert_obj)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=403, detail="Certificate chain/signature validation failed.")
+
+    try:
+        # payload_bytes is now the plaintext JSON because mTLS handled the transport layer
         payload_bytes = base64.b64decode(envelope.payload)
         signature_bytes = base64.b64decode(envelope.signature)
-        doctor_pub = base64.b64decode(doctor_pub_b64)
     except Exception:
-        audit.warning("Upload rejected: malformed base64 in payload/signature/public key for doctor_id=%s", doctor_id)
-        raise HTTPException(status_code=400, detail="Malformed payload/signature/public key encoding.")
+        raise HTTPException(status_code=400, detail="Malformed payload/signature encoding.")
 
     computed_payload_hash = sha256_hex(payload_bytes)
     if computed_payload_hash != envelope.payload_hash:
-        audit.warning(
-            "Upload rejected: payload hash mismatch for doctor_id=%s expected=%s got=%s",
-            doctor_id,
-            envelope.payload_hash,
-            computed_payload_hash,
-        )
         raise HTTPException(status_code=401, detail="Integrity check failed: payload hash mismatch.")
-    audit.info("Integrity check passed: payload hash verified for doctor_id=%s", doctor_id)
 
     signature_message = build_doctor_signature_message(
         kid=envelope.kid,
@@ -121,53 +152,30 @@ def receive_record(envelope: SecureEnvelope):
     )
 
     verifier = DSAManager(private_bytes=None)
-    is_verified = verifier.verify(signature_message, signature_bytes, doctor_pub)
+    is_verified = verifier.verify(signature_message, signature_bytes, cert_bound_doctor_pub)
     if not is_verified:
         audit.warning("Upload rejected: signature verification failed for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=401, detail="Invalid PQC Signature")
-    audit.info("Upload signature verification passed for doctor_id=%s", doctor_id)
-    audit.info("Integrity step: signature over canonical hash context verified for doctor_id=%s", doctor_id)
+    
+    audit.info("Application-layer signature verification passed for doctor_id=%s", doctor_id)
 
-    # --- 3. DECRYPT TRANSPORT PAYLOAD USING ACTIVE SESSION KEY ---
-    try:
-        transit_nonce = base64.b64decode(envelope.nonce)
-    except Exception:
-        audit.warning("Upload rejected: malformed transport nonce for doctor_id=%s", doctor_id)
-        raise HTTPException(status_code=400, detail="Malformed transport nonce encoding.")
-    _print_crypto_data("Server transport ciphertext (before session decryption)", payload_bytes)
-
-    decrypted_patient_package = None
-    for session_key in state.active_sessions.values():
-        try:
-            decrypted_patient_package = AESGCM(session_key).decrypt(transit_nonce, payload_bytes, None)
-            break
-        except Exception:
-            continue
-
-    if decrypted_patient_package is None:
-        audit.warning("Upload rejected: transport decryption failed for doctor_id=%s (no matching active session key)", doctor_id)
-        raise HTTPException(status_code=401, detail="Unable to decrypt payload with active session keys.")
-    audit.info("Upload transport decryption succeeded for doctor_id=%s", doctor_id)
-    _print_crypto_data("Server transport plaintext (after session decryption)", decrypted_patient_package)
-
-    # --- 4. EXTRACT PATIENT ID + RE-ENCRYPT WITH SERVER MASTER KEY ---
+    # --- 3. EXTRACT PATIENT ID + RE-ENCRYPT WITH SERVER MASTER KEY ---
     patient_id = envelope.patient_id
     try:
-        patient_package_obj = json.loads(decrypted_patient_package.decode("utf-8"))
+        patient_package_obj = json.loads(payload_bytes.decode("utf-8"))
         patient_id = patient_package_obj.get("patient_id", patient_id)
     except Exception:
-        # Keep metadata patient_id if inner payload is not JSON-decodable
         pass
 
     if not patient_id:
-        audit.warning("Upload rejected: missing patient_id after decryption for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=400, detail="patient_id missing from payload metadata.")
 
+    # Encrypt the package for at-rest storage
     master_nonce = os.urandom(12)
-    _print_crypto_data("Server plaintext (before master-key encryption)", decrypted_patient_package)
-    master_ciphertext = AESGCM(state.master_key).encrypt(master_nonce, decrypted_patient_package, None)
+    _print_crypto_data("Server plaintext (before master-key encryption)", payload_bytes)
+    master_ciphertext = AESGCM(state.master_key).encrypt(master_nonce, payload_bytes, None)
     _print_crypto_data("Server ciphertext (after master-key encryption)", master_ciphertext)
-    # Keep envelope schema by embedding nonce + ciphertext inside payload.
+    
     stored_payload_bytes = master_nonce + master_ciphertext
     stored_payload_b64 = base64.b64encode(stored_payload_bytes).decode()
     stored_payload_hash = sha256_hex(stored_payload_bytes)
@@ -181,12 +189,7 @@ def receive_record(envelope: SecureEnvelope):
             payload_hash=stored_payload_hash,
         )
     )
-    audit.info(
-        "Integrity step: server storage hashes computed patient_id=%s payload_hash=%s record_hash=%s",
-        patient_id,
-        stored_payload_hash,
-        record_hash,
-    )
+    
     stored_envelope = StoredVaultEnvelope(
         master_kid=state.master_kid,
         timestamp=stored_timestamp,
@@ -196,7 +199,7 @@ def receive_record(envelope: SecureEnvelope):
         record_hash=record_hash,
     )
 
-    # --- 5. STORE UNDER vault/<patient_id>/ ---
+    # --- 4. STORE UNDER vault/<patient_id>/ ---
     patient_dir = os.path.join(STORAGE_DIR, _safe_path_component(str(patient_id)))
     os.makedirs(patient_dir, exist_ok=True)
     record_id = f"rec_{int(time.time())}_{_safe_path_component(base64.b64encode(os.urandom(6)).decode())}"
@@ -204,22 +207,37 @@ def receive_record(envelope: SecureEnvelope):
 
     with open(file_path, "w") as f:
         json.dump(stored_envelope.model_dump(), f, indent=4)
+
+    integrity_event_path = append_integrity_event(
+        {
+            "kind": "upload_integrity_v1",
+            "timestamp": stored_timestamp,
+            "doctor_id": doctor_id,
+            "message_id": message_id,
+            "nonce": envelope.nonce,
+            "request_timestamp": envelope.timestamp,
+            "patient_id": str(patient_id),
+            "payload_hash": envelope.payload_hash,
+            "signature_b64": envelope.signature,
+            "record_id": record_id,
+            "record_hash": record_hash,
+            "cert_id": valid_cert.get("id"),
+        }
+    )
+        
     audit.info(
-        "Upload stored: doctor_id=%s patient_id=%s record_id=%s master_kid=%s path=%s",
-        doctor_id,
-        patient_id,
-        record_id,
-        state.master_kid,
-        file_path,
+        "Upload stored: doctor_id=%s patient_id=%s record_id=%s master_kid=%s path=%s integrity_log=%s",
+        doctor_id, patient_id, record_id, state.master_kid, file_path, integrity_event_path,
     )
     
     return {
-        "status": "Verified, decrypted, re-encrypted with master key, and secured",
+        "status": "Verified, re-encrypted with master key, and secured",
         "record_id": record_id,
         "patient_id": patient_id,
         "master_kid": state.master_kid,
         "saved_to": file_path
     }
+
 
 @router.post("/auth/change-password")
 def server_change_password(doctor_id: str, old_pass: str, new_pass: str):
@@ -228,14 +246,14 @@ def server_change_password(doctor_id: str, old_pass: str, new_pass: str):
         audit.warning("Password change rejected: doctor not found doctor_id=%s", doctor_id)
         raise HTTPException(status_code=404, detail="Doctor not found")
     
-    # Verify old password on server
-    if db.doctors[doctor_id]["password"] != old_pass:
+    # Securely verify the old password using bcrypt
+    if not verify_password(old_pass, db.doctors[doctor_id].get("password", "")):
         audit.warning("Password change rejected: old password mismatch doctor_id=%s", doctor_id)
         raise HTTPException(status_code=401, detail="Old password incorrect")
     
-    # Update the permanent database
-    db.doctors[doctor_id]["password"] = new_pass
-    db.save_db() # Persist to hospital_vault.json
+    # Hash the new password using bcrypt before storing it
+    db.doctors[doctor_id]["password"] = hash_password(new_pass)
+    db.save_db()
     audit.info("Password change succeeded for doctor_id=%s", doctor_id)
     
     return {"message": "Password updated successfully on server."}

@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pydantic import BaseModel
 from typing import Optional, List
 import secrets
@@ -142,6 +143,37 @@ class VaultQDatabase:
         # Save to the JSON file immediately
         self.save_db()
         return cert_id
+
+    def revoke_active_certificates(self, doctor_id: str, reason: str = "revoked_by_admin") -> int:
+        """Marks all active certificates for a doctor as revoked."""
+        revoked = 0
+        now_ts = int(time.time())
+        for cert in self.certificates.values():
+            if cert.get("doctor_id") == doctor_id and cert.get("status") == "active":
+                cert["status"] = "revoked"
+                cert["revoked_at"] = now_ts
+                cert["revocation_reason"] = reason
+                revoked += 1
+        if revoked:
+            self.audit.info(
+                "DB revoke_active_certificates: doctor_id=%s revoked=%s reason=%s",
+                doctor_id,
+                revoked,
+                reason,
+            )
+            self.save_db()
+        return revoked
+
+    def get_latest_active_certificate(self, doctor_id: str):
+        """Returns the latest active certificate record for a doctor."""
+        candidates = [
+            cert
+            for cert in self.certificates.values()
+            if cert.get("doctor_id") == doctor_id and cert.get("status") == "active"
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda c: float(c.get("expires_at", 0)))
 
 # Instantiate the global database object
 db = VaultQDatabase()

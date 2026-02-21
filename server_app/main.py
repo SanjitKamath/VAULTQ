@@ -1,33 +1,54 @@
+import uvicorn
+import ssl
+import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-import os
-from .core.audit_logger import get_audit_logger
 
-# 1. Import the missing admin_api
-from .routers import handshake_api, doctor_api, admin_api, auth_api
+app = FastAPI(title="VaultQ Core Server")
 
+# Define template directory for the admin dashboard
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "ui", "templates")
 
-app = FastAPI(title="VaultQ Core Server")
-audit = get_audit_logger()
-audit.info("Server bootstrap: FastAPI app initialized")
-
-# 2. Include all three routers
-app.include_router(handshake_api.router)
+# Include API routers (handshake_api is removed since TLS handles it)
+from .routers import doctor_api, admin_api, auth_api
 app.include_router(doctor_api.router)
-app.include_router(admin_api.router) 
+app.include_router(admin_api.router)
 app.include_router(auth_api.router)
-audit.info("Server bootstrap: routers registered (handshake, doctor, admin, auth)")
 
+# Restored: Admin Dashboard UI Route
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard():
     with open(os.path.join(TEMPLATE_DIR, "admin.html"), "r") as f:
         return f.read()
-    
 
-    
-"""
-To run independantly for testing, use:
-$env:PYTHONPATH = "$PWD"; uvicorn server_app.main:app --host 127.0.0.1 --port 8080
-"""
+def start_secure_server():
+    """Starts the Uvicorn server with Mutual TLS (mTLS) enforced."""
+    cert_dir = os.path.join(BASE_DIR, "storage", "certs")
+    server_cert = os.path.join(cert_dir, "server.crt")
+    server_key = os.path.join(cert_dir, "server.key")
+    root_ca = os.path.join(cert_dir, "hospital_root_ca.pem")
+
+    if os.path.exists(server_cert) and os.path.exists(server_key) and os.path.exists(root_ca):
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8443,
+            ssl_certfile=server_cert,
+            ssl_keyfile=server_key,
+            ssl_ca_certs=root_ca,
+            ssl_cert_reqs=ssl.CERT_REQUIRED,
+        )
+        return
+
+    if os.getenv("VAULTQ_ALLOW_INSECURE_DEV", "0") == "1":
+        uvicorn.run(app, host="0.0.0.0", port=8080)
+        return
+
+    raise RuntimeError(
+        "TLS artifacts missing. Expected server.crt/server.key/hospital_root_ca.pem in server_app/storage/certs. "
+        "Set VAULTQ_ALLOW_INSECURE_DEV=1 only for local development."
+    )
+
+if __name__ == "__main__":
+    start_secure_server()
