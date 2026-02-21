@@ -1,6 +1,7 @@
 import threading
 import time
-from security_suite.crypto import ECDHManager, KEMManager, DSAManager
+import heapq
+from security_suite.crypto import ECDHManager, KEMManager
 # Import the bootstrapping function we wrote earlier
 from .ca_setup import bootstrap_hospital_root_ca
 from .master_key_store import MasterKeyStore
@@ -10,18 +11,12 @@ class ServerState:
     def __init__(self):
         self.audit = get_audit_logger()
         self.audit.info("ServerState init: starting security subsystem bootstrap")
-        # 1. Hospital Certificate Authority (CA) Identity Key
-        self.hospital_ca = DSAManager(private_bytes=None) 
-        
-        # FIX: We must explicitly generate the ML-DSA keypair 
-        self.hospital_ca.generate_keypair() 
-        self.audit.info("ServerState init: hospital CA keypair generated")
-        
-        # 2. Bootstrap the Root CA (Generates the self-signed X.509 cert)
-        self.hospital_root_cert = bootstrap_hospital_root_ca(self.hospital_ca)
+
+        # 1. Bootstrap/load Root CA certificate (public material only in long-lived state)
+        self.hospital_root_cert = bootstrap_hospital_root_ca()
         self.audit.info("ServerState init: hospital root certificate bootstrapped")
 
-        # 3. Long-term Server Identity Keys for the Handshake
+        # 2. Long-term Server Identity Keys for the Handshake
         self.ecdh = ECDHManager()
         self.kem = KEMManager()
         self.audit.info("ServerState init: handshake identities ready (ECDH + PQC KEM)")
@@ -31,6 +26,7 @@ class ServerState:
         
         # Replay cache (message-id -> first_seen_epoch), bounded by TTL cleanup.
         self.replay_cache = {}
+        self.replay_expiry_heap = []  # (expires_at_epoch, message_id)
         self._replay_lock = threading.Lock()
 
         # Server-side at-rest master key (persistent across restarts)
@@ -42,16 +38,21 @@ class ServerState:
         Returns True if the message_id is a replay; otherwise stores it and returns False.
         """
         now = int(time.time())
-        cutoff = now - ttl_seconds
+        expires_at = now + ttl_seconds
         with self._replay_lock:
-            stale = [k for k, ts in self.replay_cache.items() if ts < cutoff]
-            for k in stale:
-                del self.replay_cache[k]
+            # Incremental expiry cleanup: only evict entries that are actually expired.
+            while self.replay_expiry_heap and self.replay_expiry_heap[0][0] <= now:
+                exp, mid = heapq.heappop(self.replay_expiry_heap)
+                # Delete only if this heap record still matches current expiry in map.
+                current_exp = self.replay_cache.get(mid)
+                if current_exp is not None and current_exp == exp:
+                    del self.replay_cache[mid]
 
             if message_id in self.replay_cache:
                 return True
 
-            self.replay_cache[message_id] = now
+            self.replay_cache[message_id] = expires_at
+            heapq.heappush(self.replay_expiry_heap, (expires_at, message_id))
             return False
 
 # Global Singleton

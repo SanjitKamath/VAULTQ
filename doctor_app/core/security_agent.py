@@ -38,7 +38,7 @@ class SecurityAgent:
         self.is_connected = False
         
         keys_dir = Path(getattr(config, "keys_dir", "doctor_app/storage/keys"))
-        keys_dir.mkdir(parents=True, exist_ok=True)
+        keys_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.cert_path = str(keys_dir / "doctor_cert.pem")
         self.key_path = str(keys_dir / "doctor_container.key")
         self.ca_cert_path = config.ca_cert_path
@@ -65,26 +65,17 @@ class SecurityAgent:
         threading.Thread(target=self._connection_task, daemon=True).start()
 
     def _tls_request_kwargs(self):
-        """Use mTLS when cert assets exist, otherwise fall back to dev HTTP/S mode."""
-        if str(config.server_url).lower().startswith("http://"):
-            return {"verify": False}
+        """Use strict mTLS over HTTPS only."""
+        if not str(config.server_url).lower().startswith("https://"):
+            raise RuntimeError("Insecure server URL blocked. VaultQ doctor client requires HTTPS.")
         if (
             os.path.exists(self.cert_path)
             and os.path.exists(self.key_path)
             and os.path.exists(self.ca_cert_path)
         ):
             return {"cert": (self.cert_path, self.key_path), "verify": self.ca_cert_path}
-        if config.allow_insecure_dev:
-            self.audit.warning(
-                "mTLS assets missing for doctor_id=%s cert=%s key=%s ca=%s; using insecure dev mode",
-                self.doctor_id,
-                self.cert_path,
-                self.key_path,
-                self.ca_cert_path,
-            )
-            return {"verify": False}
         raise RuntimeError(
-            "mTLS assets missing. Provide doctor cert/key/CA or set allow_insecure_dev=True explicitly."
+            "mTLS assets missing. Provide doctor certificate, private key, and trusted CA certificate."
         )
 
     def _connection_task(self):

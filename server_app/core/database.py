@@ -15,6 +15,7 @@ class DoctorRecord(BaseModel):
     specialty: str = "General Practice"
     status: str = "pending"
     pqc_public_key_b64: Optional[str] = None
+    csr_pem: Optional[str] = None
     password: Optional[str] = None
 
 class CertRecord(BaseModel):
@@ -56,7 +57,7 @@ class VaultQDatabase:
             self.audit.exception("DB load error: %s", str(e))
 
     def save_db(self):
-        self.db_file.parent.mkdir(parents=True, exist_ok=True)  
+        self.db_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)  
         with open(self.db_file, "w") as f:
             json.dump({
                 "doctors": self.doctors, 
@@ -95,7 +96,9 @@ class VaultQDatabase:
             "password": password,
             "status": "authorized",
             "specialty": "General Practice",
-            "pqc_public_key_b64": None
+            "pqc_public_key_b64": None,
+            "tls_public_key_pem": None,
+            "csr_pem": None,
         }
         self.audit.info("DB add_pre_authorized_doctor: doctor_id=%s name=%s", doc_id, name)
         self.save_db()

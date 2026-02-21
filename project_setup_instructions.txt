@@ -29,8 +29,7 @@ From repo root (VAULTQ_Backup):
 Create .env from .env.sample and set values:
 
   VAULTQ_ADMIN_TOKEN = long random secret
-  VAULTQ_ALLOW_INSECURE_DEV = 1   (local non-TLS dev only)
-                             0   (secure/TLS mode)
+  VAULTQ_SERVER_URL = https://127.0.0.1:8080
 
 PowerShell example for current terminal session:
 
@@ -66,12 +65,7 @@ Start doctor desktop app:
   python -m doctor_app.main
 
 Admin UI:
-
-  Dev mode (no TLS):
-    http://127.0.0.1:8080/admin
-
-  Full TLS mode:
-    https://127.0.0.1:8443/admin
+  https://127.0.0.1:8080/admin
 
 
 5) FIRST-TIME ONBOARDING FLOW
@@ -109,8 +103,7 @@ Doctor app expects:
   - hospital_root_ca.pem (copied from server CA file)
 
 If these are missing:
-  - Use dev mode:
-      VAULTQ_ALLOW_INSECURE_DEV = 1
+  - Provision TLS assets correctly; HTTP fallback is not supported.
 
 
 7) WHERE IMPORTANT DATA IS STORED

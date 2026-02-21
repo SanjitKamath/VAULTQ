@@ -32,11 +32,20 @@ class SecureEnvelope(BaseModel):
 
 class StoredVaultEnvelope(BaseModel):
     """
-    Server-side envelope stored at rest after master-key encryption.
+    Server-side envelope stored at rest with per-record envelope encryption.
     """
     master_kid: str
     timestamp: int
+    doctor_id: str
     patient_id: str
-    payload: str
+    envelope_version: str
+    payload_cipher_alg: str
+    key_wrap_alg: str
+    payload_nonce_b64: str
+    payload_ciphertext_b64: str
     payload_hash: str       # SHA-256 of decoded payload bytes (nonce||ciphertext)
-    record_hash: str        # SHA-256 over canonical record metadata + payload
+    encrypted_dek_nonce_b64: str
+    encrypted_dek_b64: str
+    encrypted_dek_hash: str # SHA-256 of decoded encrypted DEK bytes (nonce||ciphertext)
+    aad_hash: str           # SHA-256 of storage AAD bytes
+    record_hash: str        # SHA-256 over canonical record metadata + encrypted material

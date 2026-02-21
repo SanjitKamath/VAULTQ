@@ -15,7 +15,7 @@ class MasterKeyStore:
         base_dir = os.path.dirname(os.path.dirname(__file__))
         self.storage_dir = storage_dir or os.path.join(base_dir, "storage", "keys")
         self.key_path = os.path.join(self.storage_dir, "master_key.json")
-        os.makedirs(self.storage_dir, exist_ok=True)
+        os.makedirs(self.storage_dir, mode=0o700, exist_ok=True)
         self.audit.info("MasterKeyStore initialized at %s", self.key_path)
 
     def load_or_create(self) -> tuple[str, bytes]:

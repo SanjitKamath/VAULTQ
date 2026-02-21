@@ -10,27 +10,28 @@ from security_suite.crypto.primitive_dsa import DSAManager
 
 OID_ML_DSA_65 = ObjectIdentifier("1.3.6.1.4.1.99999.1.1")
 
-def bootstrap_hospital_root_ca(ca_key_manager: DSAManager) -> x509.Certificate:
+
+def _cert_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "storage" / "certs"
+
+
+def bootstrap_hospital_root_ca() -> x509.Certificate:
     """
     Generates a Self-Signed X.509 Root Certificate for the Hospital.
     """
-    cert_dir = Path(__file__).resolve().parents[1] / "storage" / "certs"
-    cert_dir.mkdir(parents=True, exist_ok=True)
+    cert_dir = _cert_dir()
+    cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     container_key_path = cert_dir / "hospital_root_ca.key"
 
     if root_cert_path.exists() and container_key_path.exists():
         with open(root_cert_path, "rb") as f:
             root_cert = x509.load_pem_x509_certificate(f.read())
-        with open(container_key_path, "rb") as f:
-            container_key = serialization.load_pem_private_key(f.read(), password=None)
-        ca_key_manager.container_key = container_key
-        try:
-            ext = root_cert.extensions.get_extension_for_oid(OID_ML_DSA_65)
-            ca_key_manager.pk = ext.value.value
-        except Exception:
-            ca_key_manager.pk = ca_key_manager.pk
         return root_cert
+
+    # Generate a one-time PQC identity public key to embed in the CA cert extension.
+    ephemeral_ca_identity = DSAManager(private_bytes=None)
+    ephemeral_ca_identity.generate_keypair()
 
     # Create a lightweight classical key strictly to satisfy the X509 container
     container_key = ec.generate_private_key(ec.SECP256R1())
@@ -54,7 +55,7 @@ def bootstrap_hospital_root_ca(ca_key_manager: DSAManager) -> x509.Certificate:
 
     # Embed the ACTUAL VaultQ ML-DSA Key
     builder = builder.add_extension(
-        x509.UnrecognizedExtension(OID_ML_DSA_65, ca_key_manager.pk),
+        x509.UnrecognizedExtension(OID_ML_DSA_65, ephemeral_ca_identity.pk),
         critical=False
     )
 
@@ -64,9 +65,6 @@ def bootstrap_hospital_root_ca(ca_key_manager: DSAManager) -> x509.Certificate:
         algorithm=hashes.SHA256()
     )
     
-    # ATTACH THE CONTAINER KEY so it can be used to issue doctor certs later
-    ca_key_manager.container_key = container_key
-
     with open(root_cert_path, "wb") as f:
         f.write(root_cert.public_bytes(serialization.Encoding.PEM))
     with open(container_key_path, "wb") as f:
@@ -81,13 +79,40 @@ def bootstrap_hospital_root_ca(ca_key_manager: DSAManager) -> x509.Certificate:
     return root_cert
 
 
+def load_hospital_ca_signer() -> DSAManager:
+    """
+    Loads the CA signing material on demand.
+    The returned DSAManager should be short-lived and discarded after use.
+    """
+    cert_dir = _cert_dir()
+    root_cert_path = cert_dir / "hospital_root_ca.pem"
+    container_key_path = cert_dir / "hospital_root_ca.key"
+
+    if not root_cert_path.exists() or not container_key_path.exists():
+        raise RuntimeError("Hospital CA artifacts are missing.")
+
+    with open(root_cert_path, "rb") as f:
+        root_cert = x509.load_pem_x509_certificate(f.read())
+    with open(container_key_path, "rb") as f:
+        container_key = serialization.load_pem_private_key(f.read(), password=None)
+
+    signer = DSAManager(private_bytes=None)
+    signer.container_key = container_key
+    try:
+        ext = root_cert.extensions.get_extension_for_oid(OID_ML_DSA_65)
+        signer.pk = ext.value.value
+    except Exception:
+        signer.pk = None
+    return signer
+
+
 def ensure_server_tls_artifacts() -> bool:
     """
     Ensures server.key/server.crt exist under storage/certs.
     Generates a new server leaf cert signed by hospital_root_ca.key if missing.
     """
-    cert_dir = Path(__file__).resolve().parents[1] / "storage" / "certs"
-    cert_dir.mkdir(parents=True, exist_ok=True)
+    cert_dir = _cert_dir()
+    cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     root_key_path = cert_dir / "hospital_root_ca.key"

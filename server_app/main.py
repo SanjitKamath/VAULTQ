@@ -1,11 +1,14 @@
 import uvicorn
 import ssl
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from .core.ca_setup import ensure_server_tls_artifacts
 
 app = FastAPI(title="VaultQ Core Server")
+MAX_UPLOAD_BYTES = int(os.getenv("VAULTQ_MAX_UPLOAD_BYTES", "8388608"))  # 8 MiB default
+REQUIRE_MTLS = os.getenv("VAULTQ_REQUIRE_MTLS", "0") == "1"
 
 # Define template directory for the admin dashboard
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +20,34 @@ app.include_router(doctor_api.router)
 app.include_router(admin_api.router)
 app.include_router(auth_api.router)
 
+
+@app.middleware("http")
+async def upload_size_guard(request: Request, call_next):
+    """
+    Reject oversized doctor uploads before request body parsing/validation.
+    This prevents large-body JSON allocation attacks at the API layer.
+    """
+    if request.url.path == "/api/doctor/upload":
+        content_length = request.headers.get("content-length")
+        if content_length is None:
+            return JSONResponse(status_code=411, content={"detail": "Content-Length header required for upload."})
+
+        try:
+            content_length_val = int(content_length)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header."})
+
+        if content_length_val <= 0:
+            return JSONResponse(status_code=400, content={"detail": "Invalid upload size."})
+
+        if content_length_val > MAX_UPLOAD_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": f"Upload too large. Max {MAX_UPLOAD_BYTES} bytes."},
+            )
+
+    return await call_next(request)
+
 # Restored: Admin Dashboard UI Route
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard():
@@ -24,7 +55,7 @@ def admin_dashboard():
         return f.read()
 
 def start_secure_server():
-    """Starts the Uvicorn server with TLS enforced on port 8080."""
+    """Starts the Uvicorn server with TLS on port 8080, optional mTLS via env flag."""
     cert_dir = os.path.join(BASE_DIR, "storage", "certs")
     server_cert = os.path.join(cert_dir, "server.crt")
     server_key = os.path.join(cert_dir, "server.key")
@@ -47,7 +78,7 @@ def start_secure_server():
         ssl_certfile=server_cert,
         ssl_keyfile=server_key,
         ssl_ca_certs=root_ca,
-        ssl_cert_reqs=ssl.CERT_REQUIRED,
+        ssl_cert_reqs=ssl.CERT_REQUIRED if REQUIRE_MTLS else ssl.CERT_NONE,
     )
 
 if __name__ == "__main__":

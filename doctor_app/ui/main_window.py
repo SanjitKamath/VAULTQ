@@ -4,6 +4,7 @@ from tkinter import filedialog, messagebox
 from doctor_app.core.config import config
 from doctor_app.core.models import UploadForm
 from doctor_app.core.security_agent import SecurityAgent
+from doctor_app.core.keystore import LocalKeyVault
 import requests
 import time
 import queue
@@ -30,13 +31,14 @@ class VaultQDoctorApp(ctk.CTkToplevel):
         self.geometry("1000x650")
 
         self.doctor_id = doctor_id
+        self.vault = LocalKeyVault()
         self.selected_file_path = None
         self._closing = False
         self.server_url = (server_url or config.server_url or "").rstrip("/")
         if self.server_url:
             config.server_url = self.server_url
-            if self.server_url.lower().startswith("http://"):
-                config.allow_insecure_dev = True
+            if not self.server_url.lower().startswith("https://"):
+                raise ValueError("Insecure server URL blocked. VaultQ doctor client requires HTTPS.")
 
         # Thread-safe UI queue
         self._ui_queue = queue.Queue()
@@ -188,6 +190,13 @@ class VaultQDoctorApp(ctk.CTkToplevel):
         self.theme_switch.select()
         self.theme_switch.grid(row=1, column=0, sticky="w", pady=10)
 
+        self.change_pass_btn = ctk.CTkButton(
+            self.settings_tab,
+            text="Change Password",
+            command=self.action_change_password,
+        )
+        self.change_pass_btn.grid(row=2, column=0, sticky="w", pady=10)
+
     # ---------------- Callbacks ---------------- #
 
     def toggle_theme(self):
@@ -240,6 +249,54 @@ class VaultQDoctorApp(ctk.CTkToplevel):
         except Exception as e:
             self.append_log(f"Upload Error: {e}", "ERROR")
             self.upload_btn.configure(text="Encrypt & Upload")
+
+    def action_change_password(self):
+        old_password = ctk.CTkInputDialog(
+            text="Enter current password:",
+            title="Change Password"
+        ).get_input()
+        if not old_password:
+            return
+
+        new_password = ctk.CTkInputDialog(
+            text="Enter new password:",
+            title="Change Password"
+        ).get_input()
+        if not new_password:
+            return
+
+        confirm_password = ctk.CTkInputDialog(
+            text="Confirm new password:",
+            title="Change Password"
+        ).get_input()
+        if new_password != confirm_password:
+            messagebox.showerror("Password Mismatch", "New passwords do not match.")
+            return
+
+        try:
+            resp = requests.post(
+                f"{self.server_url}/api/doctor/auth/change-password",
+                params={
+                    "doctor_id": self.doctor_id,
+                    "old_pass": old_password,
+                    "new_pass": new_password,
+                },
+                timeout=10,
+                **self.agent._tls_request_kwargs(),
+            )
+            if resp.status_code != 200:
+                detail = resp.json().get("detail", "Failed to change password.")
+                messagebox.showerror("Change Password Failed", detail)
+                self.append_log(f"Password change rejected: {detail}", "WARNING")
+                return
+
+            # Keep local vault password aligned with server password post-change.
+            self.vault.change_password(self.doctor_id, old_password, new_password)
+            messagebox.showinfo("Password Updated", "Password changed successfully.")
+            self.append_log("Password changed successfully on server and local vault.", "SUCCESS")
+        except Exception as e:
+            self.append_log(f"Password change error: {e}", "ERROR")
+            messagebox.showerror("Change Password Error", str(e))
 
 
     def _auto_handshake(self):
