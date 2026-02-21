@@ -3,7 +3,12 @@ import json
 import base64
 from fastapi import APIRouter, HTTPException
 import time
-from security_suite.security.models import SecureEnvelope
+from security_suite.security.models import SecureEnvelope, StoredVaultEnvelope
+from security_suite.security.integrity import (
+    sha256_hex,
+    build_doctor_signature_message,
+    build_server_record_hash_message,
+)
 from security_suite.crypto import DSAManager
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ..core.database import db
@@ -43,6 +48,13 @@ def receive_record(envelope: SecureEnvelope):
     # --- 1. AUTHORIZATION & CERTIFICATE VALIDATION ---
     doctor_id = envelope.kid
     audit.info("Upload received: doctor_id=%s timestamp=%s", doctor_id, envelope.timestamp)
+    audit.info(
+        "Doctor attestation packet received doctor_id=%s patient_id=%s payload_hash=%s signature_b64=%s",
+        envelope.kid,
+        envelope.patient_id,
+        envelope.payload_hash,
+        envelope.signature,
+    )
     
     # A. Check if the Doctor exists and is active
     doc = db.doctors.get(doctor_id)
@@ -89,12 +101,32 @@ def receive_record(envelope: SecureEnvelope):
         audit.warning("Upload rejected: malformed base64 in payload/signature/public key for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=400, detail="Malformed payload/signature/public key encoding.")
 
+    computed_payload_hash = sha256_hex(payload_bytes)
+    if computed_payload_hash != envelope.payload_hash:
+        audit.warning(
+            "Upload rejected: payload hash mismatch for doctor_id=%s expected=%s got=%s",
+            doctor_id,
+            envelope.payload_hash,
+            computed_payload_hash,
+        )
+        raise HTTPException(status_code=401, detail="Integrity check failed: payload hash mismatch.")
+    audit.info("Integrity check passed: payload hash verified for doctor_id=%s", doctor_id)
+
+    signature_message = build_doctor_signature_message(
+        kid=envelope.kid,
+        nonce=envelope.nonce,
+        timestamp=envelope.timestamp,
+        patient_id=envelope.patient_id,
+        payload_hash=envelope.payload_hash,
+    )
+
     verifier = DSAManager(private_bytes=None)
-    is_verified = verifier.verify(payload_bytes, signature_bytes, doctor_pub)
+    is_verified = verifier.verify(signature_message, signature_bytes, doctor_pub)
     if not is_verified:
         audit.warning("Upload rejected: signature verification failed for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=401, detail="Invalid PQC Signature")
     audit.info("Upload signature verification passed for doctor_id=%s", doctor_id)
+    audit.info("Integrity step: signature over canonical hash context verified for doctor_id=%s", doctor_id)
 
     # --- 3. DECRYPT TRANSPORT PAYLOAD USING ACTIVE SESSION KEY ---
     try:
@@ -135,15 +167,34 @@ def receive_record(envelope: SecureEnvelope):
     _print_crypto_data("Server plaintext (before master-key encryption)", decrypted_patient_package)
     master_ciphertext = AESGCM(state.master_key).encrypt(master_nonce, decrypted_patient_package, None)
     _print_crypto_data("Server ciphertext (after master-key encryption)", master_ciphertext)
-    # Keep envelope schema exactly as requested by embedding nonce + ciphertext inside payload.
-    stored_payload_b64 = base64.b64encode(master_nonce + master_ciphertext).decode()
-
-    stored_envelope = {
-        "master_kid": state.master_kid,
-        "timestamp": int(time.time()),
-        "patient_id": patient_id,
-        "payload": stored_payload_b64,
-    }
+    # Keep envelope schema by embedding nonce + ciphertext inside payload.
+    stored_payload_bytes = master_nonce + master_ciphertext
+    stored_payload_b64 = base64.b64encode(stored_payload_bytes).decode()
+    stored_payload_hash = sha256_hex(stored_payload_bytes)
+    stored_timestamp = int(time.time())
+    record_hash = sha256_hex(
+        build_server_record_hash_message(
+            master_kid=state.master_kid,
+            timestamp=stored_timestamp,
+            patient_id=str(patient_id),
+            payload=stored_payload_b64,
+            payload_hash=stored_payload_hash,
+        )
+    )
+    audit.info(
+        "Integrity step: server storage hashes computed patient_id=%s payload_hash=%s record_hash=%s",
+        patient_id,
+        stored_payload_hash,
+        record_hash,
+    )
+    stored_envelope = StoredVaultEnvelope(
+        master_kid=state.master_kid,
+        timestamp=stored_timestamp,
+        patient_id=str(patient_id),
+        payload=stored_payload_b64,
+        payload_hash=stored_payload_hash,
+        record_hash=record_hash,
+    )
 
     # --- 5. STORE UNDER vault/<patient_id>/ ---
     patient_dir = os.path.join(STORAGE_DIR, _safe_path_component(str(patient_id)))
@@ -152,7 +203,7 @@ def receive_record(envelope: SecureEnvelope):
     file_path = os.path.join(patient_dir, f"{record_id}.json")
 
     with open(file_path, "w") as f:
-        json.dump(stored_envelope, f, indent=4)
+        json.dump(stored_envelope.model_dump(), f, indent=4)
     audit.info(
         "Upload stored: doctor_id=%s patient_id=%s record_id=%s master_kid=%s path=%s",
         doctor_id,

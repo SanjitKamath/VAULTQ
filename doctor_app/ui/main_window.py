@@ -256,7 +256,7 @@ class VaultQDoctorApp(ctk.CTkToplevel):
                     _, text, level = item
                     timestamp = time.strftime("%H:%M:%S")
                     formatted = f"[{timestamp}] [{level}] {text}\n"
-                    with open("doctor_app/doctor_app.log", "a") as f:
+                    with open("doctor_app/logs/doctor_app.log", "a") as f:
                         f.write(formatted)
                     self._write_log(formatted)
 

@@ -26,4 +26,17 @@ class SecureEnvelope(BaseModel):
     timestamp: int          # Validity window check
     patient_id: str         # For routing and access control
     payload: str            # AES Encrypted Data (Base64)
-    signature: str          # ML-DSA Signature of (payload + header)
+    payload_hash: str       # SHA-256 hash of encrypted payload bytes
+    signature: str          # ML-DSA Signature over canonical context (includes payload_hash + metadata)
+
+
+class StoredVaultEnvelope(BaseModel):
+    """
+    Server-side envelope stored at rest after master-key encryption.
+    """
+    master_kid: str
+    timestamp: int
+    patient_id: str
+    payload: str
+    payload_hash: str       # SHA-256 of decoded payload bytes (nonce||ciphertext)
+    record_hash: str        # SHA-256 over canonical record metadata + payload

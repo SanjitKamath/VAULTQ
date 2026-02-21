@@ -7,6 +7,7 @@ import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from security_suite.crypto import ECDHManager, KEMManager, DSAManager, HybridSessionManager
 from security_suite.security.models import SecureEnvelope
+from security_suite.security.integrity import sha256_hex, build_doctor_signature_message
 from .config import config
 from .models import HandshakeResponse, HandshakePayload, UploadForm
 from .audit_logger import get_audit_logger
@@ -175,24 +176,64 @@ class SecurityAgent:
             transit_nonce = os.urandom(12)
             transit_ciphertext = transit_aes.encrypt(transit_nonce, patient_package_bytes, None)
             _print_crypto_data("Transport ciphertext (after session encryption)", transit_ciphertext)
+            transit_payload_hash = sha256_hex(transit_ciphertext)
+            self.audit.info(
+                "Integrity step: transport payload hash computed doctor_id=%s patient_id=%s hash=%s",
+                self.doctor_id,
+                form.patient_id,
+                transit_payload_hash,
+            )
 
             # 3. Server Authentication Signature
             self.log("Signing transport envelope for Server...", "DEBUG")
             self.audit.info("Upload stage: transport signature generated doctor_id=%s", self.doctor_id)
-            transit_signature = self.signer.sign(transit_ciphertext)
+            envelope_nonce_b64 = base64.b64encode(transit_nonce).decode()
+            envelope_timestamp = int(time.time())
+            envelope_kid = self.doctor_id or config.doctor_kid or "unknown_kid"
+            signature_message = build_doctor_signature_message(
+                kid=envelope_kid,
+                nonce=envelope_nonce_b64,
+                timestamp=envelope_timestamp,
+                patient_id=form.patient_id,
+                payload_hash=transit_payload_hash,
+            )
+            transit_signature = self.signer.sign(signature_message)
             
             if not transit_signature:
                 raise ValueError("Transport signing failed.")
+            self.audit.info(
+                "Integrity step: signature generated over canonical hash context doctor_id=%s patient_id=%s",
+                self.doctor_id,
+                form.patient_id,
+            )
 
             # 4. Package for Server Storage
             # FIX: Ensure we use self.doctor_id as the kid
             envelope = SecureEnvelope(
-                kid=self.doctor_id or config.doctor_kid or "unknown_kid",
-                nonce=base64.b64encode(transit_nonce).decode(),
-                timestamp=int(time.time()),
+                kid=envelope_kid,
+                nonce=envelope_nonce_b64,
+                timestamp=envelope_timestamp,
                 patient_id=form.patient_id,
                 payload=base64.b64encode(transit_ciphertext).decode(),
+                payload_hash=transit_payload_hash,
                 signature=base64.b64encode(transit_signature).decode()
+            )
+            attestation_packet = {
+                "doctor_kid": envelope.kid,
+                "timestamp": envelope.timestamp,
+                "patient_id": envelope.patient_id,
+                "payload_hash": envelope.payload_hash,
+                "signature_b64": envelope.signature,
+            }
+            self.log(
+                f"Doctor attestation packet (certificate-equivalent) prepared: {json.dumps(attestation_packet)}",
+                "DEBUG",
+            )
+            self.audit.info(
+                "Doctor attestation packet prepared doctor_id=%s patient_id=%s payload_hash=%s",
+                envelope.kid,
+                envelope.patient_id,
+                envelope.payload_hash,
             )
 
             # 5. Transmit

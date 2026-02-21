@@ -404,3 +404,217 @@
 [21:20:58] [INFO] Transmitting Secure Envelope...
 2026-02-20 21:20:58 [INFO] [vaultq.doctor.audit] Upload success doctor_id=doc_9d8ec8 patient_id=1250 record_id=rec_1771602658_av1Y0TgN
 [21:20:58] [SUCCESS] Upload Successful! ID: rec_1771602658_av1Y0TgN
+2026-02-20 21:55:57 [INFO] [vaultq.doctor.audit] Doctor app startup initiated
+2026-02-20 21:55:57 [INFO] [vaultq.doctor.audit] Doctor login window initialized
+2026-02-20 21:55:57 [INFO] [vaultq.doctor.audit] LocalKeyVault initialized at doctor_app/storage/keystore
+2026-02-20 21:56:44 [INFO] [vaultq.doctor.audit] Login attempt started for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] Login verify request sent for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] Login verify accepted for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity start for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity miss for doctor_id=doc_82b9d7 (vault not found)
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=None
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] SecurityAgent: generated new ML-DSA identity for doctor_id=None
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] Doctor onboarding accepted for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity start for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity complete for doctor_id=doc_82b9d7
+2026-02-20 21:56:45 [INFO] [vaultq.doctor.audit] Local ML-DSA identity stored for doctor_id=doc_82b9d7
+2026-02-20 21:56:47 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=doc_82b9d7
+2026-02-20 21:56:47 [INFO] [vaultq.doctor.audit] SecurityAgent: loaded existing ML-DSA identity for doctor_id=doc_82b9d7
+[21:56:47] [INFO] Security agent initialized
+[21:56:47] [INFO] Existing ML-DSA Identity loaded from secure vault.
+2026-02-20 21:56:47 [INFO] [vaultq.doctor.audit] Handshake start for doctor_id=doc_82b9d7
+2026-02-20 21:56:47 [INFO] [vaultq.doctor.audit] Handshake: received server hybrid public keys
+2026-02-20 21:56:47 [INFO] [vaultq.doctor.audit] Handshake: derived hybrid session key
+[21:56:47] [INFO] Auto-initiating secure handshake...
+[21:56:48] [INFO] Connecting to VaultQ Server...
+2026-02-20 21:56:48 [INFO] [vaultq.doctor.audit] Handshake success for doctor_id=doc_82b9d7
+[21:56:48] [DEBUG] Received Server Hybrid Public Keys.
+[21:56:48] [SUCCESS] Handshake Complete. Quantum-Secure Session Established.
+2026-02-20 21:58:47 [INFO] [vaultq.doctor.audit] Doctor app shutdown
+2026-02-20 21:59:00 [INFO] [vaultq.doctor.audit] Doctor app startup initiated
+2026-02-20 21:59:01 [INFO] [vaultq.doctor.audit] Doctor login window initialized
+2026-02-20 21:59:01 [INFO] [vaultq.doctor.audit] LocalKeyVault initialized at doctor_app/storage/keystore
+2026-02-20 21:59:13 [INFO] [vaultq.doctor.audit] Login attempt started for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] Login verify request sent for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] Login verify accepted for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity start for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity miss for doctor_id=doc_939668 (vault not found)
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=None
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] SecurityAgent: generated new ML-DSA identity for doctor_id=None
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] Doctor onboarding accepted for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity start for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity complete for doctor_id=doc_939668
+2026-02-20 21:59:14 [INFO] [vaultq.doctor.audit] Local ML-DSA identity stored for doctor_id=doc_939668
+2026-02-20 21:59:16 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=doc_939668
+2026-02-20 21:59:16 [INFO] [vaultq.doctor.audit] SecurityAgent: loaded existing ML-DSA identity for doctor_id=doc_939668
+[21:59:16] [INFO] Security agent initialized
+[21:59:16] [INFO] Existing ML-DSA Identity loaded from secure vault.
+2026-02-20 21:59:17 [INFO] [vaultq.doctor.audit] Handshake start for doctor_id=doc_939668
+2026-02-20 21:59:17 [INFO] [vaultq.doctor.audit] Handshake: received server hybrid public keys
+2026-02-20 21:59:17 [INFO] [vaultq.doctor.audit] Handshake: derived hybrid session key
+[21:59:17] [INFO] Auto-initiating secure handshake...
+[21:59:17] [INFO] Connecting to VaultQ Server...
+2026-02-20 21:59:17 [INFO] [vaultq.doctor.audit] Handshake success for doctor_id=doc_939668
+[21:59:17] [DEBUG] Received Server Hybrid Public Keys.
+[21:59:17] [SUCCESS] Handshake Complete. Quantum-Secure Session Established.
+2026-02-20 21:59:24 [INFO] [vaultq.doctor.audit] Upload start doctor_id=doc_939668 patient_id=6767 file=C:/Users/Sanjit Kamath/Downloads/Dockerfile (1)
+2026-02-20 21:59:24 [INFO] [vaultq.doctor.audit] Patient payload stage: DEK generation started patient_id=6767
+2026-02-20 21:59:24 [INFO] [vaultq.doctor.audit] Patient payload stage: at-rest encryption complete patient_id=6767
+[21:59:24] [INFO] Reading Dockerfile (1)...
+2026-02-20 21:59:24 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation started patient_id=6767
+[21:59:24] [DEBUG] Generating one-time Data Encryption Key (DEK)...
+[21:59:24] [DEBUG] Encrypting medical record for Patient...
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation complete patient_id=6767
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Upload stage: transport encryption applied doctor_id=doc_939668 patient_id=6767
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Integrity step: transport payload hash computed doctor_id=doc_939668 patient_id=6767 hash=c7683f3f43b0bfb0ae29156d9e423540fd1264b107f9718e11f7ebf278d742db
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Upload stage: transport signature generated doctor_id=doc_939668
+[21:59:25] [DEBUG] Signing patient payload with ML-DSA Identity...
+[21:59:25] [DEBUG] Applying Transport Encryption...
+[21:59:25] [DEBUG] Signing transport envelope for Server...
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Integrity step: signature generated over canonical hash context doctor_id=doc_939668 patient_id=6767
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Doctor attestation packet prepared doctor_id=doc_939668 patient_id=6767 payload_hash=c7683f3f43b0bfb0ae29156d9e423540fd1264b107f9718e11f7ebf278d742db
+2026-02-20 21:59:25 [INFO] [vaultq.doctor.audit] Upload stage: transmitting envelope doctor_id=doc_939668 patient_id=6767
+2026-02-20 21:59:25 [WARNING] [vaultq.doctor.audit] Upload rejected doctor_id=doc_939668 patient_id=6767 detail=Forbidden: Doctor has not been issued a valid certificate.
+[21:59:25] [DEBUG] Doctor attestation packet (certificate-equivalent) prepared: {"doctor_kid": "doc_939668", "timestamp": 1771604965, "patient_id": "6767", "payload_hash": "c7683f3f43b0bfb0ae29156d9e423540fd1264b107f9718e11f7ebf278d742db", "signature_b64": "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"}
+[21:59:26] [INFO] Transmitting Secure Envelope...
+[21:59:26] [ERROR] Upload Rejected: Forbidden: Doctor has not been issued a valid certificate.
+2026-02-20 21:59:36 [INFO] [vaultq.doctor.audit] Doctor app shutdown
+2026-02-20 21:59:43 [INFO] [vaultq.doctor.audit] Doctor app startup initiated
+2026-02-20 21:59:43 [INFO] [vaultq.doctor.audit] Doctor login window initialized
+2026-02-20 21:59:43 [INFO] [vaultq.doctor.audit] LocalKeyVault initialized at doctor_app/storage/keystore
+2026-02-20 22:00:06 [INFO] [vaultq.doctor.audit] Login attempt started for doctor_id=doc_82b9d7
+2026-02-20 22:00:07 [INFO] [vaultq.doctor.audit] Login verify request sent for doctor_id=doc_82b9d7
+2026-02-20 22:00:07 [INFO] [vaultq.doctor.audit] Login verify accepted for doctor_id=doc_82b9d7
+2026-02-20 22:00:07 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity start for doctor_id=doc_82b9d7
+2026-02-20 22:00:07 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity success for doctor_id=doc_82b9d7
+2026-02-20 22:00:07 [INFO] [vaultq.doctor.audit] Login using existing local ML-DSA identity for doctor_id=doc_82b9d7
+2026-02-20 22:00:09 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=doc_82b9d7
+2026-02-20 22:00:09 [INFO] [vaultq.doctor.audit] SecurityAgent: loaded existing ML-DSA identity for doctor_id=doc_82b9d7
+[22:00:09] [INFO] Security agent initialized
+[22:00:09] [INFO] Existing ML-DSA Identity loaded from secure vault.
+2026-02-20 22:00:09 [INFO] [vaultq.doctor.audit] Handshake start for doctor_id=doc_82b9d7
+[22:00:09] [INFO] Auto-initiating secure handshake...
+2026-02-20 22:00:09 [INFO] [vaultq.doctor.audit] Handshake: received server hybrid public keys
+2026-02-20 22:00:09 [INFO] [vaultq.doctor.audit] Handshake: derived hybrid session key
+[22:00:09] [INFO] Connecting to VaultQ Server...
+[22:00:09] [DEBUG] Received Server Hybrid Public Keys.
+2026-02-20 22:00:09 [INFO] [vaultq.doctor.audit] Handshake success for doctor_id=doc_82b9d7
+[22:00:09] [SUCCESS] Handshake Complete. Quantum-Secure Session Established.
+2026-02-20 22:00:16 [INFO] [vaultq.doctor.audit] Upload start doctor_id=doc_82b9d7 patient_id=6767 file=C:/Users/Sanjit Kamath/Downloads/Employment-Bond Navikenz 2026.pdf
+2026-02-20 22:00:16 [INFO] [vaultq.doctor.audit] Patient payload stage: DEK generation started patient_id=6767
+2026-02-20 22:00:16 [INFO] [vaultq.doctor.audit] Patient payload stage: at-rest encryption complete patient_id=6767
+[22:00:16] [INFO] Reading Employment-Bond Navikenz 2026.pdf...
+2026-02-20 22:00:16 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation started patient_id=6767
+[22:00:16] [DEBUG] Generating one-time Data Encryption Key (DEK)...
+[22:00:16] [DEBUG] Encrypting medical record for Patient...
+[22:00:16] [DEBUG] Signing patient payload with ML-DSA Identity...
+2026-02-20 22:00:17 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation complete patient_id=6767
+2026-02-20 22:00:17 [INFO] [vaultq.doctor.audit] Upload stage: transport encryption applied doctor_id=doc_82b9d7 patient_id=6767
+[22:00:17] [DEBUG] Applying Transport Encryption...
+2026-02-20 22:00:17 [INFO] [vaultq.doctor.audit] Integrity step: transport payload hash computed doctor_id=doc_82b9d7 patient_id=6767 hash=521e27af34a5b07747cc436dbdfd60d24ca56e65598526ad71d6ec9ab0ae4898
+2026-02-20 22:00:17 [INFO] [vaultq.doctor.audit] Upload stage: transport signature generated doctor_id=doc_82b9d7
+[22:00:17] [DEBUG] Signing transport envelope for Server...
+2026-02-20 22:00:18 [INFO] [vaultq.doctor.audit] Integrity step: signature generated over canonical hash context doctor_id=doc_82b9d7 patient_id=6767
+2026-02-20 22:00:18 [INFO] [vaultq.doctor.audit] Doctor attestation packet prepared doctor_id=doc_82b9d7 patient_id=6767 payload_hash=521e27af34a5b07747cc436dbdfd60d24ca56e65598526ad71d6ec9ab0ae4898
+2026-02-20 22:00:18 [INFO] [vaultq.doctor.audit] Upload stage: transmitting envelope doctor_id=doc_82b9d7 patient_id=6767
+[22:00:18] [DEBUG] Doctor attestation packet (certificate-equivalent) prepared: {"doctor_kid": "doc_82b9d7", "timestamp": 1771605017, "patient_id": "6767", "payload_hash": "521e27af34a5b07747cc436dbdfd60d24ca56e65598526ad71d6ec9ab0ae4898", "signature_b64": "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"}
+2026-02-20 22:00:19 [INFO] [vaultq.doctor.audit] Upload success doctor_id=doc_82b9d7 patient_id=6767 record_id=rec_1771605019_WARnG1Jz
+[22:00:19] [INFO] Transmitting Secure Envelope...
+[22:00:19] [SUCCESS] Upload Successful! ID: rec_1771605019_WARnG1Jz
+2026-02-20 22:17:34 [INFO] [vaultq.doctor.audit] Doctor app shutdown
+2026-02-20 23:06:57 [INFO] [vaultq.doctor.audit] Doctor app startup initiated
+2026-02-20 23:06:58 [INFO] [vaultq.doctor.audit] Doctor login window initialized
+2026-02-20 23:06:58 [INFO] [vaultq.doctor.audit] LocalKeyVault initialized at doctor_app/storage/keystore
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] Login attempt started for doctor_id=doc_4ec00f
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] Login verify request sent for doctor_id=doc_4ec00f
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] Login verify accepted for doctor_id=doc_4ec00f
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity start for doctor_id=doc_4ec00f
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity miss for doctor_id=doc_4ec00f (vault not found)
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=None
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] SecurityAgent: generated new ML-DSA identity for doctor_id=None
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] Doctor onboarding accepted for doctor_id=doc_4ec00f
+2026-02-20 23:30:16 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity start for doctor_id=doc_4ec00f
+2026-02-20 23:30:17 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity complete for doctor_id=doc_4ec00f
+2026-02-20 23:30:17 [INFO] [vaultq.doctor.audit] Local ML-DSA identity stored for doctor_id=doc_4ec00f
+2026-02-20 23:30:18 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=doc_4ec00f
+2026-02-20 23:30:18 [INFO] [vaultq.doctor.audit] SecurityAgent: loaded existing ML-DSA identity for doctor_id=doc_4ec00f
+[23:30:18] [INFO] Security agent initialized
+[23:30:18] [INFO] Existing ML-DSA Identity loaded from secure vault.
+2026-02-20 23:30:19 [INFO] [vaultq.doctor.audit] Handshake start for doctor_id=doc_4ec00f
+2026-02-20 23:30:19 [INFO] [vaultq.doctor.audit] Handshake: received server hybrid public keys
+2026-02-20 23:30:19 [INFO] [vaultq.doctor.audit] Handshake: derived hybrid session key
+2026-02-20 23:30:19 [INFO] [vaultq.doctor.audit] Handshake success for doctor_id=doc_4ec00f
+[23:30:19] [INFO] Auto-initiating secure handshake...
+[23:30:19] [INFO] Connecting to VaultQ Server...
+[23:30:19] [DEBUG] Received Server Hybrid Public Keys.
+[23:30:19] [SUCCESS] Handshake Complete. Quantum-Secure Session Established.
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Upload start doctor_id=doc_4ec00f patient_id=1012 file=C:/Users/Sanjit Kamath/Downloads/Seminar-Timetable.pdf
+[23:33:14] [INFO] Reading Seminar-Timetable.pdf...
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Patient payload stage: DEK generation started patient_id=1012
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Patient payload stage: at-rest encryption complete patient_id=1012
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation started patient_id=1012
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation complete patient_id=1012
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Upload stage: transport encryption applied doctor_id=doc_4ec00f patient_id=1012
+[23:33:14] [DEBUG] Generating one-time Data Encryption Key (DEK)...
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Integrity step: transport payload hash computed doctor_id=doc_4ec00f patient_id=1012 hash=5f5f871868d9ced5c5e73ae5ce7fc34ae63cce63a2d8d33967d78f900b6ce262
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Upload stage: transport signature generated doctor_id=doc_4ec00f
+[23:33:14] [DEBUG] Encrypting medical record for Patient...
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Integrity step: signature generated over canonical hash context doctor_id=doc_4ec00f patient_id=1012
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Doctor attestation packet prepared doctor_id=doc_4ec00f patient_id=1012 payload_hash=5f5f871868d9ced5c5e73ae5ce7fc34ae63cce63a2d8d33967d78f900b6ce262
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Upload stage: transmitting envelope doctor_id=doc_4ec00f patient_id=1012
+[23:33:14] [DEBUG] Signing patient payload with ML-DSA Identity...
+[23:33:14] [DEBUG] Applying Transport Encryption...
+[23:33:14] [DEBUG] Signing transport envelope for Server...
+[23:33:14] [DEBUG] Doctor attestation packet (certificate-equivalent) prepared: {"doctor_kid": "doc_4ec00f", "timestamp": 1771610594, "patient_id": "1012", "payload_hash": "5f5f871868d9ced5c5e73ae5ce7fc34ae63cce63a2d8d33967d78f900b6ce262", "signature_b64": "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"}
+2026-02-20 23:33:14 [INFO] [vaultq.doctor.audit] Upload success doctor_id=doc_4ec00f patient_id=1012 record_id=rec_1771610594_NmkjWC4W
+[23:33:15] [INFO] Transmitting Secure Envelope...
+[23:33:15] [SUCCESS] Upload Successful! ID: rec_1771610594_NmkjWC4W
+2026-02-20 23:36:08 [INFO] [vaultq.doctor.audit] Doctor app shutdown
+2026-02-20 23:36:16 [INFO] [vaultq.doctor.audit] Doctor app startup initiated
+2026-02-20 23:36:17 [INFO] [vaultq.doctor.audit] Doctor login window initialized
+2026-02-20 23:36:17 [INFO] [vaultq.doctor.audit] LocalKeyVault initialized at doctor_app/storage/keystore
+2026-02-20 23:36:27 [INFO] [vaultq.doctor.audit] Login attempt started for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] Login verify request sent for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] Login verify accepted for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity start for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] LocalKeyVault load_identity miss for doctor_id=doc_daec77 (vault not found)
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=None
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] SecurityAgent: generated new ML-DSA identity for doctor_id=None
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] Doctor onboarding accepted for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity start for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] LocalKeyVault save_identity complete for doctor_id=doc_daec77
+2026-02-20 23:36:28 [INFO] [vaultq.doctor.audit] Local ML-DSA identity stored for doctor_id=doc_daec77
+2026-02-20 23:36:29 [INFO] [vaultq.doctor.audit] SecurityAgent init for doctor_id=doc_daec77
+2026-02-20 23:36:29 [INFO] [vaultq.doctor.audit] SecurityAgent: loaded existing ML-DSA identity for doctor_id=doc_daec77
+[23:36:29] [INFO] Security agent initialized
+[23:36:29] [INFO] Existing ML-DSA Identity loaded from secure vault.
+2026-02-20 23:36:30 [INFO] [vaultq.doctor.audit] Handshake start for doctor_id=doc_daec77
+2026-02-20 23:36:30 [INFO] [vaultq.doctor.audit] Handshake: received server hybrid public keys
+2026-02-20 23:36:30 [INFO] [vaultq.doctor.audit] Handshake: derived hybrid session key
+[23:36:30] [INFO] Auto-initiating secure handshake...
+[23:36:30] [INFO] Connecting to VaultQ Server...
+2026-02-20 23:36:30 [INFO] [vaultq.doctor.audit] Handshake success for doctor_id=doc_daec77
+[23:36:30] [DEBUG] Received Server Hybrid Public Keys.
+[23:36:30] [SUCCESS] Handshake Complete. Quantum-Secure Session Established.
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Upload start doctor_id=doc_daec77 patient_id=1976 file=C:/Users/Sanjit Kamath/Downloads/requirements (1).txt
+[23:36:45] [INFO] Reading requirements (1).txt...
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Patient payload stage: DEK generation started patient_id=1976
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Patient payload stage: at-rest encryption complete patient_id=1976
+[23:36:45] [DEBUG] Generating one-time Data Encryption Key (DEK)...
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation started patient_id=1976
+[23:36:45] [DEBUG] Encrypting medical record for Patient...
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Patient payload stage: signature generation complete patient_id=1976
+[23:36:45] [DEBUG] Signing patient payload with ML-DSA Identity...
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Upload stage: transport encryption applied doctor_id=doc_daec77 patient_id=1976
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Integrity step: transport payload hash computed doctor_id=doc_daec77 patient_id=1976 hash=fb89448d5283a728277e6ec51001168aeae58b49ecbc0de98c5931f9496e8104
+2026-02-20 23:36:45 [INFO] [vaultq.doctor.audit] Upload stage: transport signature generated doctor_id=doc_daec77
+[23:36:45] [DEBUG] Applying Transport Encryption...
+2026-02-20 23:36:46 [INFO] [vaultq.doctor.audit] Integrity step: signature generated over canonical hash context doctor_id=doc_daec77 patient_id=1976
+2026-02-20 23:36:46 [INFO] [vaultq.doctor.audit] Doctor attestation packet prepared doctor_id=doc_daec77 patient_id=1976 payload_hash=fb89448d5283a728277e6ec51001168aeae58b49ecbc0de98c5931f9496e8104
+2026-02-20 23:36:46 [INFO] [vaultq.doctor.audit] Upload stage: transmitting envelope doctor_id=doc_daec77 patient_id=1976
+[23:36:46] [DEBUG] Signing transport envelope for Server...
+[23:36:46] [DEBUG] Doctor attestation packet (certificate-equivalent) prepared: {"doctor_kid": "doc_daec77", "timestamp": 1771610805, "patient_id": "1976", "payload_hash": "fb89448d5283a728277e6ec51001168aeae58b49ecbc0de98c5931f9496e8104", "signature_b64": "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"}
+2026-02-20 23:36:46 [WARNING] [vaultq.doctor.audit] Upload rejected doctor_id=doc_daec77 patient_id=1976 detail=Forbidden: Doctor has not been issued a valid certificate.
+[23:36:46] [INFO] Transmitting Secure Envelope...
+[23:36:46] [ERROR] Upload Rejected: Forbidden: Doctor has not been issued a valid certificate.
+2026-02-20 23:45:53 [INFO] [vaultq.doctor.audit] Doctor app shutdown

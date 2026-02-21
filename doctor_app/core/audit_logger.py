@@ -14,7 +14,7 @@ def get_audit_logger() -> logging.Logger:
     logger.propagate = False
 
     base_dir = Path(__file__).resolve().parents[1]
-    logfile = base_dir / "doctor_app.log"
+    logfile = base_dir / "logs" / "doctor_app.log"
 
     formatter = logging.Formatter(
         fmt="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
