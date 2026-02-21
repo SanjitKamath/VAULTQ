@@ -3,6 +3,7 @@ import ssl
 import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from .core.ca_setup import ensure_server_tls_artifacts
 
 app = FastAPI(title="VaultQ Core Server")
 
@@ -23,31 +24,30 @@ def admin_dashboard():
         return f.read()
 
 def start_secure_server():
-    """Starts the Uvicorn server with Mutual TLS (mTLS) enforced."""
+    """Starts the Uvicorn server with TLS enforced on port 8080."""
     cert_dir = os.path.join(BASE_DIR, "storage", "certs")
     server_cert = os.path.join(cert_dir, "server.crt")
     server_key = os.path.join(cert_dir, "server.key")
     root_ca = os.path.join(cert_dir, "hospital_root_ca.pem")
+    port = 8080
 
-    if os.path.exists(server_cert) and os.path.exists(server_key) and os.path.exists(root_ca):
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=8443,
-            ssl_certfile=server_cert,
-            ssl_keyfile=server_key,
-            ssl_ca_certs=root_ca,
-            ssl_cert_reqs=ssl.CERT_REQUIRED,
+    # Auto-provision server cert/key from existing hospital root CA if missing.
+    generated = ensure_server_tls_artifacts()
+
+    if not (generated and os.path.exists(server_cert) and os.path.exists(server_key) and os.path.exists(root_ca)):
+        raise RuntimeError(
+            "TLS artifacts unavailable. Expected/auto-generated server.crt/server.key plus hospital_root_ca.pem in "
+            "server_app/storage/certs."
         )
-        return
 
-    if os.getenv("VAULTQ_ALLOW_INSECURE_DEV", "0") == "1":
-        uvicorn.run(app, host="0.0.0.0", port=8080)
-        return
-
-    raise RuntimeError(
-        "TLS artifacts missing. Expected server.crt/server.key/hospital_root_ca.pem in server_app/storage/certs. "
-        "Set VAULTQ_ALLOW_INSECURE_DEV=1 only for local development."
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        ssl_certfile=server_cert,
+        ssl_keyfile=server_key,
+        ssl_ca_certs=root_ca,
+        ssl_cert_reqs=ssl.CERT_REQUIRED,
     )
 
 if __name__ == "__main__":
