@@ -1,8 +1,12 @@
 import base64
+import os
 import requests
 import customtkinter as ctk
-from tkinter import messagebox, Canvas
+from tkinter import messagebox
 import sys
+
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
 
 from doctor_app.ui.main_window import VaultQDoctorApp
 from doctor_app.core.keystore import LocalKeyVault
@@ -15,6 +19,7 @@ class LoginWindow(ctk.CTk):
         super().__init__()
         self.audit = get_audit_logger()
         self.audit.info("Doctor login window initialized")
+        self.server_url = str(config.server_url).rstrip("/")
 
         self.title("VaultQ – Secure Doctor Login")
         self.geometry("460x420")
@@ -27,6 +32,64 @@ class LoginWindow(ctk.CTk):
         self._center_window()
         self._build_ui()
         self._fade_in()
+
+    def _request_verify_arg(self):
+        if str(self.server_url).lower().startswith("http://"):
+            return False
+        if config.allow_insecure_dev:
+            return False
+        if not os.path.exists(config.ca_cert_path):
+            raise RuntimeError(
+                f"CA certificate not found: {config.ca_cert_path}. "
+                "Either provide the CA cert, or set VAULTQ_ALLOW_INSECURE_DEV=1 for local dev."
+            )
+        return config.ca_cert_path
+
+    def _try_local_dev_fallback(self, exc: Exception) -> bool:
+        """Fallback only for local loopback when TLS port is unavailable."""
+        current = str(self.server_url).lower()
+        if not current.startswith("https://127.0.0.1:8443"):
+            return False
+        if "actively refused" not in str(exc).lower() and "failed to establish a new connection" not in str(exc).lower():
+            return False
+
+        self.server_url = "http://127.0.0.1:8080"
+        config.server_url = self.server_url
+        config.allow_insecure_dev = True
+        self.audit.warning(
+            "Auto-switched doctor client to local dev server URL=%s after TLS connection failure",
+            self.server_url,
+        )
+        return True
+
+    def _keys_dir(self):
+        keys_dir = config.keys_dir if getattr(config, "keys_dir", None) else "doctor_app/storage/keys"
+        os.makedirs(keys_dir, exist_ok=True)
+        return keys_dir
+
+    def _clear_local_tls_assets(self):
+        keys_dir = self._keys_dir()
+        for name in ("doctor_container.key", "doctor_cert.pem"):
+            path = os.path.join(keys_dir, name)
+            if os.path.exists(path):
+                os.remove(path)
+                self.audit.info("Removed stale local TLS asset: %s", path)
+
+    def _copy_server_ca_if_available(self):
+        if os.path.exists(config.ca_cert_path):
+            return
+        server_ca = os.path.join("server_app", "storage", "certs", "hospital_root_ca.pem")
+        if os.path.exists(server_ca):
+            self._keys_dir()
+            with open(server_ca, "rb") as src, open(config.ca_cert_path, "wb") as dst:
+                dst.write(src.read())
+            self.audit.info("Copied server root CA to doctor client trust store: %s", config.ca_cert_path)
+
+    def _prepare_tls_material(self):
+        if str(config.server_url).lower().startswith("http://") or config.allow_insecure_dev:
+            return False
+        self._copy_server_ca_if_available()
+        return self._request_verify_arg()
 
     def _center_window(self):
         self.update_idletasks()
@@ -89,7 +152,6 @@ class LoginWindow(ctk.CTk):
 
     def _on_close(self):
         self.withdraw()
-        import sys
         sys.exit(0)
 
     def attempt_login(self):
@@ -111,8 +173,24 @@ class LoginWindow(ctk.CTk):
     def _perform_login(self, doc_id, password):
         try:
             self.audit.info("Login verify request sent for doctor_id=%s", doc_id)
-            resp = requests.post(f"{config.server_url}/api/auth/verify",
-                                 json={"id": doc_id, "password": password})
+            
+            # Assuming the server certificate is trusted or we bypass verification for the initial login
+            # In a strict production environment, you would bundle the hospital's CA root cert here.
+            verify_arg = self._prepare_tls_material()
+            try:
+                resp = requests.post(
+                    f"{self.server_url}/api/auth/verify",
+                    json={"id": doc_id, "password": password},
+                    verify=verify_arg
+                )
+            except requests.exceptions.ConnectionError as conn_exc:
+                if not self._try_local_dev_fallback(conn_exc):
+                    raise
+                resp = requests.post(
+                    f"{self.server_url}/api/auth/verify",
+                    json={"id": doc_id, "password": password},
+                    verify=False,
+                )
 
             if resp.status_code != 200:
                 self.audit.warning("Login verify rejected for doctor_id=%s status=%s", doc_id, resp.status_code)
@@ -123,73 +201,137 @@ class LoginWindow(ctk.CTk):
                 private_key = self.vault.load_identity(doc_id, password)
             except ValueError:
                 private_key = None
-                self.audit.info("Local vault password mismatch for doctor_id=%s; migration requested", doc_id)
-                old_local_password = ctk.CTkInputDialog(
-                    text="Server password is valid, but your local vault is still encrypted with your previous password.\n\nEnter previous local password to migrate:",
-                    title="Migrate Local Vault"
-                ).get_input()
+                self.audit.info("Local vault password mismatch for doctor_id=%s; migration or recovery required", doc_id)
 
-                if not old_local_password:
-                    self.audit.warning("Local vault migration cancelled for doctor_id=%s", doc_id)
-                    raise Exception("Local vault migration cancelled.")
+                choice = messagebox.askyesnocancel(
+                    "Local Vault Locked",
+                    "Your server password is valid, but the local vault still uses the previous password.\n\n"
+                    "Yes: Enter old local password and migrate vault.\n"
+                    "No: I forgot old local password (re-enroll local keys and request a new certificate).\n"
+                    "Cancel: Abort login."
+                )
 
-                self.vault.change_password(doc_id, old_local_password, password)
-                private_key = self.vault.load_identity(doc_id, password)
-                if not private_key:
-                    self.audit.error("Local vault migration failed for doctor_id=%s", doc_id)
-                    raise Exception("Local vault migration failed.")
-                self.audit.info("Local vault migration succeeded for doctor_id=%s", doc_id)
+                if choice is None:
+                    self.audit.warning("Local vault migration/recovery cancelled for doctor_id=%s", doc_id)
+                    raise Exception("Local vault recovery cancelled.")
 
+                if choice is True:
+                    old_local_password = ctk.CTkInputDialog(
+                        text="Enter previous local vault password to migrate:",
+                        title="Migrate Local Vault"
+                    ).get_input()
+                    if not old_local_password:
+                        self.audit.warning("Local vault migration cancelled for doctor_id=%s", doc_id)
+                        raise Exception("Local vault migration cancelled.")
+
+                    self.vault.change_password(doc_id, old_local_password, password)
+                    private_key = self.vault.load_identity(doc_id, password)
+                    if not private_key:
+                        self.audit.error("Local vault migration failed for doctor_id=%s", doc_id)
+                        raise Exception("Local vault migration failed.")
+                    self.audit.info("Local vault migration succeeded for doctor_id=%s", doc_id)
+                else:
+                    # Lost old local password: force local re-enrollment and fresh cert issuance.
+                    self.vault.delete_identity(doc_id)
+                    self._clear_local_tls_assets()
+                    self.audit.warning("Local vault reset for doctor_id=%s; key re-enrollment will start", doc_id)
+
+            # If they already have keys, log them straight in
             if private_key:
                 self.audit.info("Login using existing local ML-DSA identity for doctor_id=%s", doc_id)
-                self._show_success_tick(
-                    lambda: self._animate_handshake(
-                        lambda: self._animate_exit_and_launch(doc_id, private_key)
-                    )
-                )
+                self.status_label.configure(text="✅ Authorized")
+                self._show_success_tick(lambda: self._animate_exit_and_launch(doc_id, private_key))
                 return
 
-            agent_temp = SecurityAgent(log_callback=print, status_callback=print)
-            private_key = agent_temp.signer.get_private_bytes()
-            public_key = agent_temp.signer.get_public_bytes()
+            # --- ONBOARDING: Generate both PQC and Classical TLS keys ---
+            self.status_label.configure(text="🔑 Generating Quantum-Secure & TLS Identities...")
+            self.update_idletasks()
 
-            onboard = requests.post(f"{config.server_url}/api/admin/doctors/onboard", json={
-                "id": doc_id,
-                "name": resp.json().get("name", "Doctor"),
-                "pqc_public_key_b64": base64.b64encode(public_key).decode()
-            })
+            # 1. Generate PQC (ML-DSA) keypair
+            agent_temp = SecurityAgent(log_callback=print, status_callback=print)
+            pqc_priv = agent_temp.signer.get_private_bytes()
+            pqc_pub = agent_temp.signer.get_public_bytes()
+
+            # 2. Generate Classical TLS (ECDSA) keypair
+            tls_private_key = ec.generate_private_key(ec.SECP256R1())
+            tls_public_key_pem = tls_private_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode()
+
+            # 3. Send public keys to server for enrollment
+            onboard = requests.post(
+                f"{self.server_url}/api/admin/doctors/onboard", 
+                json={
+                    "id": doc_id,
+                    "name": resp.json().get("name", "Doctor"),
+                    "pqc_public_key_b64": base64.b64encode(pqc_pub).decode(),
+                    "tls_public_key_pem": tls_public_key_pem
+                },
+                verify=verify_arg
+            )
 
             if onboard.status_code != 200:
                 self.audit.warning("Doctor onboarding rejected during login for doctor_id=%s status=%s", doc_id, onboard.status_code)
-                raise Exception("Server rejected key")
+                raise Exception("Server rejected key enrollment")
+            
             self.audit.info("Doctor onboarding accepted for doctor_id=%s", doc_id)
 
-            self.vault.save_identity(doc_id, password, private_key)
+            # 4. Securely store the private keys locally
+            self.vault.save_identity(doc_id, password, pqc_priv)
             self.audit.info("Local ML-DSA identity stored for doctor_id=%s", doc_id)
-            self._show_success_tick(
-                lambda: self._animate_handshake(
-                    lambda: self._animate_exit_and_launch(doc_id, private_key)
-                )
+
+            # Store the TLS private key
+            keys_dir = self._keys_dir()
+            tls_priv_pem = tls_private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption()
             )
+            with open(os.path.join(keys_dir, "doctor_container.key"), "wb") as f:
+                f.write(tls_priv_pem)
+
+            # 5. Start polling for the server to issue the certificate
+            self.status_label.configure(text="⏳ Waiting for Admin to issue Certificate...")
+            self.login_btn.pack_forget() # Hide login button to prevent double clicks
+            self._poll_for_certificate(doc_id, pqc_priv)
 
         except Exception as e:
             self.audit.exception("Login flow error for doctor_id=%s: %s", doc_id, str(e))
             self.login_btn.configure(text="Login", state="normal")
             self.status_label.configure(text="")
             self.error_label.configure(text=f"❌ {str(e)}")
-            self.login_btn.configure(text="Login", state="normal")
     
+    def _poll_for_certificate(self, doc_id, pqc_priv):
+        """Polls the server every 3 seconds until the Admin issues the cert."""
+        try:
+            verify_arg = self._prepare_tls_material()
+            resp = requests.get(f"{self.server_url}/api/auth/my-cert/{doc_id}", verify=verify_arg)
+            if resp.status_code == 200 and resp.json().get("status") == "issued":
+                # Save the downloaded cert
+                keys_dir = self._keys_dir()
+                with open(os.path.join(keys_dir, "doctor_cert.pem"), "w") as f:
+                    f.write(resp.json()["pem_data"])
+                    
+                self.status_label.configure(text="✅ Certificate Received!")
+                self._show_success_tick(lambda: self._animate_exit_and_launch(doc_id, pqc_priv))
+            else:
+                # Check again in 3 seconds
+                self.after(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv))
+        except Exception as e:
+            # Network issue while polling, just keep trying
+            self.audit.warning(f"Polling error for doctor_id={doc_id}: {e}")
+            self.after(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv))
+
     def _animate_exit_and_launch(self, doc_id, private_key):
         def step(alpha, y_offset):
             if alpha <= 0:
-                # ❌ self.destroy()   <-- REMOVE THIS
-                self.withdraw()      # ✅ hide login window instead
+                self.withdraw()      # Hide login window
 
                 # Create main window
-                app = VaultQDoctorApp(doctor_id=doc_id, private_key=private_key)
+                app = VaultQDoctorApp(doctor_id=doc_id, private_key=private_key, server_url=self.server_url)
                 app.deiconify()
                 app.lift()
-                app.focus_force()
                 app.focus_force()
                 return
 
@@ -203,16 +345,3 @@ class LoginWindow(ctk.CTk):
         self.login_btn.pack_forget()
         self.success_label.pack()
         self.after(300, callback)
-
-    def _animate_handshake(self, callback):
-        # Optional subtle text feedback instead of ugly spinner
-        self.status_label.configure(text="🔗 Establishing secure channel...")
-
-        # Small delay to simulate handshake animation / polish
-        def finish():
-            self.status_label.configure(text="")
-            callback()
-
-        # 400ms feels premium without being slow
-        self.after(400, finish)
-

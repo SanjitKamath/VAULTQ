@@ -99,3 +99,12 @@ class LocalKeyVault:
         self.save_identity(doctor_id, new_password, private_key)
         self.audit.info("LocalKeyVault change_password success for doctor_id=%s", doctor_id)
         return True
+
+    def delete_identity(self, doctor_id: str) -> bool:
+        """Deletes local encrypted identity for forced re-enrollment."""
+        filepath = os.path.join(self.storage_dir, f"{doctor_id}.vault")
+        if not os.path.exists(filepath):
+            return False
+        os.remove(filepath)
+        self.audit.info("LocalKeyVault delete_identity removed vault for doctor_id=%s", doctor_id)
+        return True

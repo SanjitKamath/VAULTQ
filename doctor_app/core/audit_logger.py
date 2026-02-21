@@ -13,8 +13,14 @@ def get_audit_logger() -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
+    # Resolve base directory
     base_dir = Path(__file__).resolve().parents[1]
-    logfile = base_dir / "logs" / "doctor_app.log"
+
+    # Ensure logs directory exists
+    log_dir = base_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    logfile = log_dir / "doctor_app.log"
 
     formatter = logging.Formatter(
         fmt="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",

@@ -1,9 +1,9 @@
 import customtkinter as ctk
 import os
 from tkinter import filedialog, messagebox
-from core.config import config
-from core.models import UploadForm
-from core.security_agent import SecurityAgent
+from doctor_app.core.config import config
+from doctor_app.core.models import UploadForm
+from doctor_app.core.security_agent import SecurityAgent
 import requests
 import time
 import queue
@@ -22,7 +22,7 @@ def theme_color(light, dark):
 
 
 class VaultQDoctorApp(ctk.CTkToplevel):
-    def __init__(self, doctor_id: str, private_key: bytes):
+    def __init__(self, doctor_id: str, private_key: bytes, server_url: str = None):
         super().__init__()
 
         self.title("VaultQ – Doctor Portal")
@@ -32,6 +32,11 @@ class VaultQDoctorApp(ctk.CTkToplevel):
         self.doctor_id = doctor_id
         self.selected_file_path = None
         self._closing = False
+        self.server_url = (server_url or config.server_url or "").rstrip("/")
+        if self.server_url:
+            config.server_url = self.server_url
+            if self.server_url.lower().startswith("http://"):
+                config.allow_insecure_dev = True
 
         # Thread-safe UI queue
         self._ui_queue = queue.Queue()

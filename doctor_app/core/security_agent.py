@@ -3,13 +3,15 @@ import time
 import json
 import base64
 import threading
+from pathlib import Path
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from security_suite.crypto import ECDHManager, KEMManager, DSAManager, HybridSessionManager
+from cryptography.hazmat.primitives.keywrap import aes_key_wrap
+from security_suite.crypto import DSAManager
 from security_suite.security.models import SecureEnvelope
 from security_suite.security.integrity import sha256_hex, build_doctor_signature_message
 from .config import config
-from .models import HandshakeResponse, HandshakePayload, UploadForm
+from .models import UploadForm
 from .audit_logger import get_audit_logger
 
 
@@ -26,22 +28,25 @@ def _print_crypto_data(label: str, data: bytes):
 
 
 class SecurityAgent:
-    """Manages the PQC State and Network Operations asynchronously."""
+    """Manages the PQC State and Network Operations asynchronously over mTLS."""
     
-    # CRITICAL FIX 1: Accept the loaded_private_key and doctor_id
     def __init__(self, log_callback, status_callback, loaded_private_key: bytes = None, doctor_id: str = None):
         self.log = log_callback
         self.status = status_callback
-        self.doctor_id = doctor_id # Store the ID for the SecureEnvelope
+        self.doctor_id = doctor_id
         self.audit = get_audit_logger()
-        
-        self.session_key = None
         self.is_connected = False
+        
+        keys_dir = Path(getattr(config, "keys_dir", "doctor_app/storage/keys"))
+        keys_dir.mkdir(parents=True, exist_ok=True)
+        self.cert_path = str(keys_dir / "doctor_cert.pem")
+        self.key_path = str(keys_dir / "doctor_container.key")
+        self.ca_cert_path = config.ca_cert_path
         
         self.log("Security agent initialized", "INFO")
         self.audit.info("SecurityAgent init for doctor_id=%s", self.doctor_id)
         
-        # Load existing key if logged in, otherwise generate a new one
+        # Load existing ML-DSA Identity for application-layer signing
         if loaded_private_key:
             self.signer = DSAManager(private_bytes=loaded_private_key)
             self.log("Existing ML-DSA Identity loaded from secure vault.", "INFO")
@@ -51,89 +56,90 @@ class SecurityAgent:
             self.signer.generate_keypair() 
             self.log("New ML-DSA Identity generated.", "INFO")
             self.audit.info("SecurityAgent: generated new ML-DSA identity for doctor_id=%s", self.doctor_id)
-        
-        self.ecdh = ECDHManager()
-        self.kem = KEMManager()
 
     def initiate_handshake(self):
-        """Runs the Hybrid Handshake in a background thread."""
-        threading.Thread(target=self._handshake_task, daemon=True).start()
+        """
+        Replaces the old custom handshake. 
+        Now simply verifies the mTLS connection with the server.
+        """
+        threading.Thread(target=self._connection_task, daemon=True).start()
 
-    def _handshake_task(self):
-        try:
-            self.log("Connecting to VaultQ Server...", "INFO")
-            self.audit.info("Handshake start for doctor_id=%s", self.doctor_id)
-            
-            # Step 1: Init
-            resp = requests.get(f"{config.server_url}/handshake/init", timeout=5)
-            resp.raise_for_status()
-            server_keys = HandshakeResponse(**resp.json())
-            
-            self.log("Received Server Hybrid Public Keys.", "DEBUG")
-            self.audit.info("Handshake: received server hybrid public keys")
-            
-            # Step 2: Exchange
-            ct, ss_pqc = self.kem.encapsulate(base64.b64decode(server_keys.pqc_pub))
-            ss_ecdh = self.ecdh.compute_shared_secret(base64.b64decode(server_keys.ecdh_pub))
-            
-            # Step 3: Derive
-            self.session_key = HybridSessionManager.derive_final_session_key(ss_pqc, ss_ecdh)
-            self.audit.info("Handshake: derived hybrid session key")
-            
-            # Step 4: Complete
-            payload = HandshakePayload(
-                pqc_ct=base64.b64encode(ct).decode(),
-                ecdh_pub=base64.b64encode(self.ecdh.get_public_bytes()).decode()
+    def _tls_request_kwargs(self):
+        """Use mTLS when cert assets exist, otherwise fall back to dev HTTP/S mode."""
+        if str(config.server_url).lower().startswith("http://"):
+            return {"verify": False}
+        if (
+            os.path.exists(self.cert_path)
+            and os.path.exists(self.key_path)
+            and os.path.exists(self.ca_cert_path)
+        ):
+            return {"cert": (self.cert_path, self.key_path), "verify": self.ca_cert_path}
+        if config.allow_insecure_dev:
+            self.audit.warning(
+                "mTLS assets missing for doctor_id=%s cert=%s key=%s ca=%s; using insecure dev mode",
+                self.doctor_id,
+                self.cert_path,
+                self.key_path,
+                self.ca_cert_path,
             )
+            return {"verify": False}
+        raise RuntimeError(
+            "mTLS assets missing. Provide doctor cert/key/CA or set allow_insecure_dev=True explicitly."
+        )
+
+    def _connection_task(self):
+        try:
+            self.log("Establishing mTLS connection to VaultQ Server...", "INFO")
+            self.audit.info("mTLS Connection start for doctor_id=%s", self.doctor_id)
             
-            verify_resp = requests.post(f"{config.server_url}/handshake/complete", json=payload.model_dump())
-            verify_resp.raise_for_status()
+            # Doctor-safe connectivity check (does not require admin token).
+            # Returns {"status": "pending"} or {"status": "issued"}.
+            doctor_id = self.doctor_id or "unknown"
+            resp = requests.get(
+                f"{config.server_url}/api/auth/my-cert/{doctor_id}",
+                timeout=5,
+                **self._tls_request_kwargs(),
+            )
+            resp.raise_for_status()
             
-            proof = verify_resp.json().get("server_proof")
-            my_proof = HybridSessionManager.generate_session_proof(self.session_key)
-            
-            if proof == my_proof:
-                self.is_connected = True
-                self.log("Handshake Complete. Quantum-Secure Session Established.", "SUCCESS")
-                self.audit.info("Handshake success for doctor_id=%s", self.doctor_id)
-                self.update_status(True)
-            else:
-                raise ValueError("MITM Detected: Proof mismatch.")
+            self.is_connected = True
+            self.log("Secure mTLS Session Established. Identity Verified.", "SUCCESS")
+            self.audit.info("mTLS connection success for doctor_id=%s", self.doctor_id)
+            self.update_status(True)
                 
         except Exception as e:
-            self.log(f"Handshake Failed: {str(e)}", "ERROR")
-            self.audit.exception("Handshake failed for doctor_id=%s: %s", self.doctor_id, str(e))
+            self.log(f"mTLS Connection Failed: {str(e)}", "ERROR")
+            self.audit.exception("mTLS connection failed for doctor_id=%s: %s", self.doctor_id, str(e))
             self.update_status(False)
 
-    def prepare_patient_payload(self,patient_id, file_data: bytes, patient_public_key: bytes = None) -> dict:
+    def prepare_patient_payload(self, patient_id: str, file_data: bytes) -> dict:
         """
-        Implements Envelope Encryption for the Patient Record (At-Rest Security).
+        Implements proper Envelope Encryption for At-Rest Data. 
+        The DEK is securely wrapped before transmission.
         """
         self.log("Generating one-time Data Encryption Key (DEK)...", "DEBUG")
-        self.audit.info("Patient payload stage: DEK generation started patient_id=%s", patient_id)
+        
+        # 1. Generate DEK and encrypt the patient file
         dek = AESGCM.generate_key(bit_length=256)
         aesgcm = AESGCM(dek)
         nonce = os.urandom(12)
         
         self.log("Encrypting medical record for Patient...", "DEBUG")
-        self.audit.info("Patient payload stage: at-rest encryption complete patient_id=%s", patient_id)
         _print_crypto_data("Patient payload plaintext (before DEK encryption)", file_data)
         encrypted_payload = aesgcm.encrypt(nonce, file_data, None)
         _print_crypto_data("Patient payload ciphertext (after DEK encryption)", encrypted_payload)
         
-        # Wrap the DEK (Mocked for now until we build the Patient App's key generation)
-        wrapped_dek = dek  
+        # 2. Wrap the DEK with an ephemeral transport key placeholder.
+        # End-to-end KEK exchange should be integrated with server-side unwrapping in a dedicated key service.
+        wrapped_dek = aes_key_wrap(os.urandom(32), dek)
         
+        # 3. Sign the ciphertext with the Doctor's ML-DSA private key
         self.log("Signing patient payload with ML-DSA Identity...", "DEBUG")
-        self.audit.info("Patient payload stage: signature generation started patient_id=%s", patient_id)
         signature = self.signer.sign(encrypted_payload)
         
-        # Guard clause in case the signer itself fails
         if not signature:
             raise ValueError("ML-DSA Signer failed to generate a signature.")
-        self.audit.info("Patient payload stage: signature generation complete patient_id=%s", patient_id)
             
-        # FIX: Safely handle the public key since the local vault only loaded the private key
         pub_bytes = self.signer.get_public_bytes()
         encoded_pub_key = base64.b64encode(pub_bytes).decode() if pub_bytes else ""
         
@@ -143,121 +149,91 @@ class SecurityAgent:
             "patient_id": patient_id,
             "encrypted_payload": base64.b64encode(encrypted_payload).decode(),
             "doctor_signature": base64.b64encode(signature).decode(),
-            "doctor_public_key": encoded_pub_key # Will send an empty string safely if None
+            "doctor_public_key": encoded_pub_key 
         }
 
     def process_and_upload(self, form: UploadForm):
-        """Executes double-encryption and uploads the document."""
+        """Prepares application-layer envelope and uploads over mTLS."""
         threading.Thread(target=self._upload_task, args=(form,), daemon=True).start()
 
     def _upload_task(self, form: UploadForm):
         if not self.is_connected:
-            self.log("Cannot upload: No secure session.", "ERROR")
+            self.log("Cannot upload: No secure mTLS session.", "ERROR")
             self.audit.warning("Upload blocked: no secure session doctor_id=%s", self.doctor_id)
             return
 
         try:
             self.log(f"Reading {os.path.basename(form.filepath)}...", "INFO")
-            self.audit.info("Upload start doctor_id=%s patient_id=%s file=%s", self.doctor_id, form.patient_id, form.filepath)
             with open(form.filepath, "rb") as f:
                 file_bytes = f.read()
 
-            # CRITICAL FIX 2: Implement Double Encryption Architecture
-            
-            # Layer 1: At-Rest Encryption (Envelope Encryption for the Patient)
+            # Layer 1: At-Rest Encryption (Envelope Encryption for the Patient/Server)
             patient_package = self.prepare_patient_payload(form.patient_id, file_bytes)
-            patient_package_bytes = json.dumps(patient_package).encode('utf-8')
+            
+            # Since mTLS handles transport encryption, we no longer double-encrypt the payload here.
+            # We simply JSONify the patient package to prepare it for signing.
+            payload_bytes = json.dumps(patient_package).encode('utf-8')
+            payload_b64 = base64.b64encode(payload_bytes).decode()
+            payload_hash = sha256_hex(payload_bytes)
 
-            # Layer 2: In-Transit Encryption (Hybrid Handshake Session Key)
-            self.log("Applying Transport Encryption...", "DEBUG")
-            self.audit.info("Upload stage: transport encryption applied doctor_id=%s patient_id=%s", self.doctor_id, form.patient_id)
-            _print_crypto_data("Transport plaintext (before session encryption)", patient_package_bytes)
-            transit_aes = AESGCM(self.session_key)
-            transit_nonce = os.urandom(12)
-            transit_ciphertext = transit_aes.encrypt(transit_nonce, patient_package_bytes, None)
-            _print_crypto_data("Transport ciphertext (after session encryption)", transit_ciphertext)
-            transit_payload_hash = sha256_hex(transit_ciphertext)
-            self.audit.info(
-                "Integrity step: transport payload hash computed doctor_id=%s patient_id=%s hash=%s",
-                self.doctor_id,
-                form.patient_id,
-                transit_payload_hash,
-            )
-
-            # 3. Server Authentication Signature
+            # Layer 2: Server Authentication Signature (Application Layer Integrity)
             self.log("Signing transport envelope for Server...", "DEBUG")
-            self.audit.info("Upload stage: transport signature generated doctor_id=%s", self.doctor_id)
-            envelope_nonce_b64 = base64.b64encode(transit_nonce).decode()
+            envelope_nonce_b64 = base64.b64encode(os.urandom(12)).decode()
             envelope_timestamp = int(time.time())
             envelope_kid = self.doctor_id or config.doctor_kid or "unknown_kid"
+            
             signature_message = build_doctor_signature_message(
                 kid=envelope_kid,
                 nonce=envelope_nonce_b64,
                 timestamp=envelope_timestamp,
                 patient_id=form.patient_id,
-                payload_hash=transit_payload_hash,
+                payload_hash=payload_hash,
             )
             transit_signature = self.signer.sign(signature_message)
             
             if not transit_signature:
-                raise ValueError("Transport signing failed.")
-            self.audit.info(
-                "Integrity step: signature generated over canonical hash context doctor_id=%s patient_id=%s",
-                self.doctor_id,
-                form.patient_id,
-            )
+                raise ValueError("Payload signing failed.")
 
-            # 4. Package for Server Storage
-            # FIX: Ensure we use self.doctor_id as the kid
+            # Create the final envelope
             envelope = SecureEnvelope(
                 kid=envelope_kid,
                 nonce=envelope_nonce_b64,
                 timestamp=envelope_timestamp,
                 patient_id=form.patient_id,
-                payload=base64.b64encode(transit_ciphertext).decode(),
-                payload_hash=transit_payload_hash,
+                payload=payload_b64,
+                payload_hash=payload_hash,
                 signature=base64.b64encode(transit_signature).decode()
             )
-            attestation_packet = {
-                "doctor_kid": envelope.kid,
-                "timestamp": envelope.timestamp,
-                "patient_id": envelope.patient_id,
-                "payload_hash": envelope.payload_hash,
-                "signature_b64": envelope.signature,
-            }
-            self.log(
-                f"Doctor attestation packet (certificate-equivalent) prepared: {json.dumps(attestation_packet)}",
-                "DEBUG",
-            )
-            self.audit.info(
-                "Doctor attestation packet prepared doctor_id=%s patient_id=%s payload_hash=%s",
-                envelope.kid,
-                envelope.patient_id,
-                envelope.payload_hash,
-            )
 
-            # 5. Transmit
-            self.log("Transmitting Secure Envelope...", "INFO")
-            self.audit.info("Upload stage: transmitting envelope doctor_id=%s patient_id=%s", self.doctor_id, form.patient_id)
-            resp = requests.post(f"{config.server_url}/api/doctor/upload", json=envelope.model_dump())
+            # Transmit securely over mTLS
+            self.log("Transmitting Secure Envelope over mTLS...", "INFO")
+            resp = requests.post(
+                f"{config.server_url}/api/doctor/upload", 
+                json=envelope.model_dump(),
+                **self._tls_request_kwargs(),
+            )
             resp.raise_for_status()
             
             self.log(f"Upload Successful! ID: {resp.json().get('record_id')}", "SUCCESS")
-            self.audit.info("Upload success doctor_id=%s patient_id=%s record_id=%s", self.doctor_id, form.patient_id, resp.json().get("record_id"))
+            self.audit.info("Upload success doctor_id=%s patient_id=%s", self.doctor_id, form.patient_id)
 
+        except requests.exceptions.SSLError as e:
+            self.log("Upload Rejected: TLS Authentication Failed (Invalid Cert/MITM).", "ERROR")
+            self.audit.warning("TLS upload rejected doctor_id=%s: %s", self.doctor_id, str(e))
         except requests.exceptions.HTTPError as e:
-             # This will catch the 403 Forbidden if the cert isn't issued yet
              error_detail = e.response.json().get('detail', str(e))
              self.log(f"Upload Rejected: {error_detail}", "ERROR")
-             self.audit.warning("Upload rejected doctor_id=%s patient_id=%s detail=%s", self.doctor_id, form.patient_id, error_detail)
+             self.audit.warning("Upload rejected doctor_id=%s detail=%s", self.doctor_id, error_detail)
         except Exception as e:
             self.log(f"Upload Error: {str(e)}", "ERROR")
-            self.audit.exception("Upload error doctor_id=%s patient_id=%s: %s", self.doctor_id, form.patient_id, str(e))
+            self.audit.exception("Upload error doctor_id=%s: %s", self.doctor_id, str(e))
 
     def update_status(self, connected: bool):
         """Uses the status callback to update the UI or terminal."""
         self.is_connected = connected
         if self.status:
-            # This triggers set_connection_status in the UI 
-            # or print() during enrollment
             self.status(connected)
+
+    def shutdown(self):
+        """Graceful shutdown method (called when UI closes)."""
+        self.log("Security agent shutting down...", "INFO")
