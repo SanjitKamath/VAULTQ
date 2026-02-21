@@ -1,30 +1,32 @@
-import base64
 import secrets
 import string
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization
 
 from ..core.database import db
 from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import hash_password
-from security_suite.security.certificates import CertificateAuthority
+from ..core.ca_setup import load_hospital_ca_signer
+from security_suite.security.certificates import (
+    CertificateAuthority,
+    load_pem_csr,
+    verify_csr_signature,
+    extract_pqc_public_key_from_csr,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["Admin Control"])
 audit = get_audit_logger()
 
 class OnboardRequest(BaseModel):
-    id: str  # <--- CRITICAL FIX: Added id
-    name: str = "Unknown Doctor"
-    pqc_public_key_b64: str
-    tls_public_key_pem: str  # <--- New field for mTLS
+    id: str
+    csr_pem: str
 
 class StatusUpdateRequest(BaseModel):
     status: str
 
-class AdminPasswordUpdateRequest(BaseModel):
-    password: str
 
 @router.get("/stats")
 def get_system_stats():
@@ -43,27 +45,17 @@ def list_doctors():
     return db.get_all_doctors()
 
 @router.put("/doctors/{doctor_id}/password")
-def set_doctor_password(doctor_id: str, payload: AdminPasswordUpdateRequest):
-    """Admin route to reset a doctor's password securely."""
-    audit.info("Admin password reset requested for doctor_id=%s", doctor_id)
-    doc = db.doctors.get(doctor_id)
-    if not doc:
-        audit.warning("Admin password reset failed: doctor not found doctor_id=%s", doctor_id)
-        raise HTTPException(status_code=404, detail="Doctor not found")
-
-    new_password = (payload.password or "").strip()
-    if not new_password:
-        raise HTTPException(status_code=400, detail="Password cannot be empty")
-
-    # CRITICAL FIX: Hash the reset password
-    doc["password"] = hash_password(new_password)
-    db.save_db()
-    audit.info("Admin password reset succeeded for doctor_id=%s", doctor_id)
-    return {"message": "Password securely updated", "doctor_id": doctor_id}
+def set_doctor_password(doctor_id: str):
+    """
+    Deprecated insecure path.
+    Password resets must use admin-authenticated recovery in server_app/routers/admin_api.py.
+    """
+    audit.warning("Deprecated core admin password route called for doctor_id=%s", doctor_id)
+    raise HTTPException(status_code=410, detail="Deprecated endpoint. Use /api/admin/doctors/{doctor_id}/recover-access.")
 
 @router.post("/doctors/onboard")
 def onboard_doctor(payload: OnboardRequest):
-    """Receives BOTH the generated ML-DSA public key and TLS public key from the Doctor App."""
+    """Receives a signed CSR from the Doctor App."""
     audit.info("Doctor onboarding payload received for doctor_id=%s", payload.id)
     
     doc = db.doctors.get(payload.id)
@@ -71,12 +63,32 @@ def onboard_doctor(payload: OnboardRequest):
         audit.warning("Doctor onboarding rejected: unprovisioned doctor_id=%s", payload.id)
         raise HTTPException(status_code=404, detail="Doctor ID not provisioned.")
     
-    # Save both public keys to the doctor's record
-    doc['pqc_public_key_b64'] = payload.pqc_public_key_b64
-    doc['tls_public_key_pem'] = payload.tls_public_key_pem
+    try:
+        doctor_csr = load_pem_csr(payload.csr_pem)
+        if not verify_csr_signature(doctor_csr):
+            raise HTTPException(status_code=400, detail="Invalid CSR signature.")
+
+        subject_ids = doctor_csr.subject.get_attributes_for_oid(NameOID.USER_ID)
+        if not subject_ids or subject_ids[0].value != payload.id:
+            raise HTTPException(status_code=400, detail="CSR subject does not match doctor identity.")
+
+        pqc_pub_bytes = extract_pqc_public_key_from_csr(doctor_csr)
+        tls_pub_pem = doctor_csr.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid CSR payload.")
+
+    import base64 as _base64
+    doc["csr_pem"] = payload.csr_pem
+    doc["pqc_public_key_b64"] = _base64.b64encode(pqc_pub_bytes).decode("utf-8")
+    doc["tls_public_key_pem"] = tls_pub_pem
     
     db.save_db()
-    audit.info("Doctor onboarding succeeded for doctor_id=%s (public keys enrolled)", payload.id)
+    audit.info("Doctor onboarding succeeded for doctor_id=%s (csr enrolled)", payload.id)
     
     return {"message": "Keys enrolled successfully"}
 
@@ -89,31 +101,32 @@ def issue_certificate(doctor_id: str):
         audit.warning("Certificate issue failed: doctor not found doctor_id=%s", doctor_id)
         raise HTTPException(status_code=404, detail="Doctor not found")
     
-    # Validation checks
-    pqc_pub_key = doc.get('pqc_public_key_b64')
-    tls_pub_key_pem = doc.get('tls_public_key_pem')
-    if not pqc_pub_key or not tls_pub_key_pem:
+    csr_pem = doc.get("csr_pem")
+    if not csr_pem:
         audit.warning("Certificate issue blocked: missing keys for doctor_id=%s", doctor_id)
         raise HTTPException(
             status_code=400, 
-            detail="Doctor has not fully enrolled. Missing PQC or TLS public keys."
+            detail="Doctor has not fully enrolled. Missing CSR."
         )
 
     try:
-        # Load PQC Public Key bytes
-        pk_bytes = base64.b64decode(pqc_pub_key)
-        
-        # Load Classical TLS Public Key
-        tls_pub_key = serialization.load_pem_public_key(tls_pub_key_pem.encode())
-        
-        # Generate the standard X.509 Certificate embedding both keys
-        cert = CertificateAuthority.generate_doctor_certificate(
-            doctor_pqc_public_bytes=pk_bytes,
-            doctor_tls_public_key=tls_pub_key, 
-            doctor_details={"name": doc['name'], "doctor_id": doc['id']},
-            issuer_key=state.hospital_ca,
-            issuer_cert=state.hospital_root_cert
-        )
+        doctor_csr = load_pem_csr(csr_pem)
+        if not verify_csr_signature(doctor_csr):
+            raise HTTPException(status_code=400, detail="Invalid CSR signature.")
+
+        subject_ids = doctor_csr.subject.get_attributes_for_oid(NameOID.USER_ID)
+        if not subject_ids or subject_ids[0].value != doc["id"]:
+            raise HTTPException(status_code=400, detail="CSR subject does not match doctor identity.")
+
+        issuer_key = load_hospital_ca_signer()
+        try:
+            cert = CertificateAuthority.generate_doctor_certificate_from_csr(
+                doctor_csr=doctor_csr,
+                issuer_key=issuer_key,
+                issuer_cert=state.hospital_root_cert,
+            )
+        finally:
+            issuer_key.container_key = None
         
         pem_data = cert.public_bytes(serialization.Encoding.PEM).decode()
         

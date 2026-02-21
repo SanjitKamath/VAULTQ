@@ -1,4 +1,3 @@
-import base64
 import os
 import requests
 import customtkinter as ctk
@@ -7,6 +6,7 @@ import sys
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
+from security_suite.security.certificates import generate_doctor_csr_pem
 
 from doctor_app.ui.main_window import VaultQDoctorApp
 from doctor_app.core.keystore import LocalKeyVault
@@ -20,6 +20,8 @@ class LoginWindow(ctk.CTk):
         self.audit = get_audit_logger()
         self.audit.info("Doctor login window initialized")
         self.server_url = str(config.server_url).rstrip("/")
+        if not self.server_url.lower().startswith("https://"):
+            raise RuntimeError("Insecure server URL blocked. Configure VAULTQ_SERVER_URL with https://")
 
         self.title("VaultQ – Secure Doctor Login")
         self.geometry("460x420")
@@ -34,37 +36,16 @@ class LoginWindow(ctk.CTk):
         self._fade_in()
 
     def _request_verify_arg(self):
-        if str(self.server_url).lower().startswith("http://"):
-            return False
-        if config.allow_insecure_dev:
-            return False
         if not os.path.exists(config.ca_cert_path):
             raise RuntimeError(
                 f"CA certificate not found: {config.ca_cert_path}. "
-                "Either provide the CA cert, or set VAULTQ_ALLOW_INSECURE_DEV=1 for local dev."
+                "Provide the CA certificate to establish a trusted HTTPS connection."
             )
         return config.ca_cert_path
 
-    def _try_local_dev_fallback(self, exc: Exception) -> bool:
-        """Fallback only for local loopback when TLS port is unavailable."""
-        current = str(self.server_url).lower()
-        if not current.startswith("https://127.0.0.1:8443"):
-            return False
-        if "actively refused" not in str(exc).lower() and "failed to establish a new connection" not in str(exc).lower():
-            return False
-
-        self.server_url = "http://127.0.0.1:8080"
-        config.server_url = self.server_url
-        config.allow_insecure_dev = True
-        self.audit.warning(
-            "Auto-switched doctor client to local dev server URL=%s after TLS connection failure",
-            self.server_url,
-        )
-        return True
-
     def _keys_dir(self):
         keys_dir = config.keys_dir if getattr(config, "keys_dir", None) else "doctor_app/storage/keys"
-        os.makedirs(keys_dir, exist_ok=True)
+        os.makedirs(keys_dir, mode=0o700, exist_ok=True)
         return keys_dir
 
     def _clear_local_tls_assets(self):
@@ -86,8 +67,8 @@ class LoginWindow(ctk.CTk):
             self.audit.info("Copied server root CA to doctor client trust store: %s", config.ca_cert_path)
 
     def _prepare_tls_material(self):
-        if str(config.server_url).lower().startswith("http://") or config.allow_insecure_dev:
-            return False
+        if not str(self.server_url).lower().startswith("https://"):
+            raise RuntimeError("Insecure server URL blocked. VaultQ doctor client requires HTTPS.")
         self._copy_server_ca_if_available()
         return self._request_verify_arg()
 
@@ -174,23 +155,12 @@ class LoginWindow(ctk.CTk):
         try:
             self.audit.info("Login verify request sent for doctor_id=%s", doc_id)
             
-            # Assuming the server certificate is trusted or we bypass verification for the initial login
-            # In a strict production environment, you would bundle the hospital's CA root cert here.
             verify_arg = self._prepare_tls_material()
-            try:
-                resp = requests.post(
-                    f"{self.server_url}/api/auth/verify",
-                    json={"id": doc_id, "password": password},
-                    verify=verify_arg
-                )
-            except requests.exceptions.ConnectionError as conn_exc:
-                if not self._try_local_dev_fallback(conn_exc):
-                    raise
-                resp = requests.post(
-                    f"{self.server_url}/api/auth/verify",
-                    json={"id": doc_id, "password": password},
-                    verify=False,
-                )
+            resp = requests.post(
+                f"{self.server_url}/api/auth/verify",
+                json={"id": doc_id, "password": password},
+                verify=verify_arg
+            )
 
             if resp.status_code != 200:
                 self.audit.warning("Login verify rejected for doctor_id=%s status=%s", doc_id, resp.status_code)
@@ -254,19 +224,20 @@ class LoginWindow(ctk.CTk):
 
             # 2. Generate Classical TLS (ECDSA) keypair
             tls_private_key = ec.generate_private_key(ec.SECP256R1())
-            tls_public_key_pem = tls_private_key.public_key().public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            ).decode()
 
-            # 3. Send public keys to server for enrollment
+            # 3. Build and submit a signed PKCS#10 CSR for CA enrollment.
+            csr_pem = generate_doctor_csr_pem(
+                doctor_id=doc_id,
+                doctor_name=resp.json().get("name", "Doctor"),
+                doctor_pqc_public_bytes=pqc_pub,
+                doctor_tls_private_key=tls_private_key,
+            )
+
             onboard = requests.post(
                 f"{self.server_url}/api/admin/doctors/onboard", 
                 json={
                     "id": doc_id,
-                    "name": resp.json().get("name", "Doctor"),
-                    "pqc_public_key_b64": base64.b64encode(pqc_pub).decode(),
-                    "tls_public_key_pem": tls_public_key_pem
+                    "csr_pem": csr_pem,
                 },
                 verify=verify_arg
             )

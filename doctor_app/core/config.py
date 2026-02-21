@@ -28,8 +28,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 _load_env_file()
 _ROOT = Path(__file__).resolve().parents[2]
 _KEYS_DIR = _ROOT / "doctor_app" / "storage" / "keys"
-_ALLOW_INSECURE_DEV = _env_bool("VAULTQ_ALLOW_INSECURE_DEV", False)
-_DEFAULT_SERVER_URL = "http://127.0.0.1:8080" if _ALLOW_INSECURE_DEV else "https://127.0.0.1:8443"
+_DEFAULT_SERVER_URL = "https://127.0.0.1:8080"
 
 
 class AppConfig(BaseModel):
@@ -37,7 +36,6 @@ class AppConfig(BaseModel):
     ca_cert_path: str = Field(
         default=os.getenv("VAULTQ_DOCTOR_CA_CERT_PATH", str(_KEYS_DIR / "hospital_root_ca.pem"))
     )
-    allow_insecure_dev: bool = Field(default=_ALLOW_INSECURE_DEV)
     keys_dir: str = Field(default=str(_KEYS_DIR))
     window_title: str = Field(default="VaultQ | Doctor Security Terminal")
     window_size: str = Field(default="1000x700")
