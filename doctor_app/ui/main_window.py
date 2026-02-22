@@ -1,50 +1,150 @@
-import customtkinter as ctk
 import os
-from tkinter import filedialog, messagebox
+import json
+import time
+import queue
+import requests
+
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QLineEdit, QFileDialog, QTabWidget,
+    QPlainTextEdit, QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
+    QFrame, QProgressBar, QListWidget, QListWidgetItem, QGraphicsOpacityEffect
+)
+from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QSettings
+from PySide6.QtGui import QFont, QCursor
+
 from doctor_app.core.config import config
 from doctor_app.core.models import UploadForm
 from doctor_app.core.security_agent import SecurityAgent
 from doctor_app.core.keystore import LocalKeyVault
-import requests
-import time
-import queue
-import tkinter as tk
-from PIL import ImageGrab, ImageTk
-
-# --- App Theme ---
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
-ctk.set_widget_scaling(1.1)
-ctk.set_window_scaling(1.1)
 
 
-def theme_color(light, dark):
-    return (light, dark)
+class FileDropZone(QFrame):
+    """Custom widget for Drag and Drop file selection with click-to-browse fallback."""
+    file_dropped = Signal(str)
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setObjectName("DropZone")
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+        
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        self.icon_label = QLabel("📄")
+        self.icon_label.setFont(QFont("Segoe UI", 32))
+        self.icon_label.setAlignment(Qt.AlignCenter)
+        self.icon_label.setObjectName("DropIcon")
+        
+        self.text_label = QLabel("Drag & Drop your record here\nor click to browse")
+        self.text_label.setAlignment(Qt.AlignCenter)
+        self.text_label.setObjectName("DropText")
+        
+        layout.addWidget(self.icon_label)
+        layout.addWidget(self.text_label)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.setProperty("dragHover", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def dragLeaveEvent(self, event):
+        self.setProperty("dragHover", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dropEvent(self, event):
+        self.setProperty("dragHover", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        
+        urls = event.mimeData().urls()
+        if urls:
+            file_path = urls[0].toLocalFile()
+            self.file_dropped.emit(file_path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
 
 
-class VaultQDoctorApp(ctk.CTkToplevel):
+class PasswordChangeDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Change Password")
+        self.setFixedSize(400, 200)
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.old = QLineEdit()
+        self.old.setEchoMode(QLineEdit.Password)
+        self.new = QLineEdit()
+        self.new.setEchoMode(QLineEdit.Password)
+        self.confirm = QLineEdit()
+        self.confirm.setEchoMode(QLineEdit.Password)
+
+        form_layout.addRow("Current password:", self.old)
+        form_layout.addRow("New password:", self.new)
+        form_layout.addRow("Confirm password:", self.confirm)
+
+        layout.addLayout(form_layout)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.validate_and_accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+    def validate_and_accept(self):
+        old_pass = self.old.text()
+        new_pass = self.new.text()
+        conf_pass = self.confirm.text()
+
+        if not old_pass or not new_pass or not conf_pass:
+            QMessageBox.warning(self, "Invalid Input", "All password fields are required.")
+            return
+        if new_pass != conf_pass:
+            QMessageBox.warning(self, "Password Mismatch", "New passwords do not match.")
+            return
+
+        self.accept()
+
+    def get_result(self):
+        if self.exec() != QDialog.Accepted:
+            return None
+        return self.old.text(), self.new.text(), self.confirm.text()
+
+
+class VaultQDoctorApp(QMainWindow):
     def __init__(self, doctor_id: str, private_key: bytes, server_url: str = None):
         super().__init__()
-
-        self.title("VaultQ – Doctor Portal")
-        self.minsize(900, 600)
-        self.geometry("1000x650")
-
         self.doctor_id = doctor_id
         self.vault = LocalKeyVault()
         self.selected_file_path = None
         self._closing = False
-        self.server_url = (server_url or config.server_url or "").rstrip("/")
-        if self.server_url:
-            config.server_url = self.server_url
-            if not self.server_url.lower().startswith("https://"):
-                raise ValueError("Insecure server URL blocked. VaultQ doctor client requires HTTPS.")
+        
+        # Initialize Settings & Load Theme Preference
+        self.settings = QSettings("VaultQ", "DoctorApp")
+        self.is_dark_mode = self.settings.value("theme/is_dark_mode", False, type=bool)
 
-        # Thread-safe UI queue
+        clean_url = (server_url or config.server_url or "").rstrip("/")
+        if clean_url and not clean_url.lower().startswith("https://"):
+            raise ValueError("Insecure server URL blocked. VaultQ doctor client requires HTTPS.")
+        self.server_url = clean_url
+        if self.server_url:
+            config.server_url = clean_url
+
         self._ui_queue = queue.Queue()
 
+        self.setWindowTitle("VaultQ – Doctor Portal")
+        self.resize(1050, 700)
         self._center_window()
         self._build_ui()
+        self._apply_theme(self.is_dark_mode)
 
         self.append_log = self._thread_safe_log
 
@@ -55,228 +155,609 @@ class VaultQDoctorApp(ctk.CTkToplevel):
             doctor_id=doctor_id
         )
 
-        self.after(50, self._process_ui_queue)
-        self.after(800, self._auto_handshake)
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
-
-    # ---------------- UI ---------------- #
+        QTimer.singleShot(50, self._process_ui_queue)
+        QTimer.singleShot(800, self._auto_handshake)
 
     def _center_window(self):
-        self.update_idletasks()
-        w, h = 1000, 650
-        x = (self.winfo_screenwidth() // 2) - (w // 2)
-        y = (self.winfo_screenheight() // 2) - (h // 2)
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        screen = self.screen().availableGeometry()
+        self.move(
+            screen.center().x() - self.width() // 2,
+            screen.center().y() - self.height() // 2
+        )
+
+    # ---- UI Definitions ----
 
     def _build_ui(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        root = QWidget(self)
+        self.setCentralWidget(root)
+        layout = QVBoxLayout(root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # --- Top Bar ---
-        self.top_bar = ctk.CTkFrame(
-            self, height=60, corner_radius=0,
-            fg_color=theme_color("#f8fafc", "#0f172a")
-        )
-        self.top_bar.grid(row=0, column=0, sticky="nsew")
-        self.top_bar.grid_columnconfigure(1, weight=1)
+        # Top Bar
+        top_bar = QWidget()
+        top_bar.setObjectName("TopBar")
+        top_bar.setFixedHeight(65)
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(24, 0, 24, 0)
 
-        self.app_title = ctk.CTkLabel(
-            self.top_bar,
-            text="VaultQ",
-            font=ctk.CTkFont(size=20, weight="bold")
-        )
-        self.app_title.grid(row=0, column=0, padx=20, pady=15, sticky="w")
+        self.title_label = QLabel("VaultQ Workspace")
+        self.title_label.setObjectName("AppTitle")
 
-        self.status_label = ctk.CTkLabel(self.top_bar, text="● Disconnected", text_color="#ef4444")
-        self.status_label.grid(row=0, column=2, padx=20)
+        self.status_label = QLabel("● Disconnected")
+        self.status_label.setObjectName("StatusLabelOffline")
+        self.status_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        
+        top_layout.addWidget(self.title_label)
+        top_layout.addStretch()
+        top_layout.addWidget(self.status_label)
 
-        self.connect_btn = ctk.CTkButton(self.top_bar, text="Connect", command=self.action_connect, width=100)
-        self.connect_btn.grid(row=0, column=3, padx=(0, 20))
+        # Main Workspace content area
+        workspace = QWidget()
+        workspace.setObjectName("Workspace")
+        ws_layout = QVBoxLayout(workspace)
+        ws_layout.setContentsMargins(24, 24, 24, 24)
 
-        # --- Tabs ---
-        self.tabs = ctk.CTkTabview(self)
-        self.tabs.grid(row=1, column=0, sticky="nsew", padx=20, pady=20)
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("MainTabs")
 
-        self.upload_tab = self.tabs.add("Upload")
-        self.logs_tab = self.tabs.add("Activity")
-        self.settings_tab = self.tabs.add("Settings")
+        self.upload_tab = QWidget()
+        self.logs_tab = QWidget()
+        self.settings_tab = QWidget()
+
+        self.tabs.addTab(self.upload_tab, "Document Upload")
+        self.tabs.addTab(self.logs_tab, "System Logs")
+        self.tabs.addTab(self.settings_tab, "Settings")
 
         self._build_upload_tab()
         self._build_logs_tab()
         self._build_settings_tab()
 
-    # ---------------- Upload Tab ---------------- #
+        ws_layout.addWidget(self.tabs)
+        layout.addWidget(top_bar)
+        layout.addWidget(workspace)
 
     def _build_upload_tab(self):
-        self.upload_tab.grid_columnconfigure(0, weight=1)
+        layout = QHBoxLayout(self.upload_tab)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(24)
 
-        self.header = ctk.CTkLabel(
-            self.upload_tab,
-            text="Secure Record Upload",
-            font=ctk.CTkFont(size=24, weight="bold")
-        )
-        self.header.grid(row=0, column=0, sticky="w", pady=(10, 20))
+        # Left Column: Upload Form
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.card = ctk.CTkFrame(
-            self.upload_tab,
-            corner_radius=16,
-            fg_color=theme_color("#ffffff", "#0f172a"),
-            border_width=1,
-            border_color=theme_color("#e5e7eb", "#1e293b")
-        )
-        self.card.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
-        self.card.grid_columnconfigure(1, weight=1)
+        header = QLabel("Upload Medical Record")
+        header.setObjectName("TabHeader")
+        left_layout.addWidget(header)
+        left_layout.addSpacing(16)
 
-        ctk.CTkLabel(
-            self.card,
-            text="Patient ID",
-            text_color=theme_color("#0f172a", "#e5e7eb")
-        ).grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
+        patient_h = QHBoxLayout()
+        patient_lbl = QLabel("Patient ID:")
+        patient_lbl.setObjectName("StandardLabel")
+        self.patient_id_entry = QLineEdit()
+        self.patient_id_entry.setPlaceholderText("e.g. PAT-8821")
+        self.patient_id_entry.textChanged.connect(self._check_upload_state)
+        patient_h.addWidget(patient_lbl)
+        patient_h.addWidget(self.patient_id_entry)
+        left_layout.addLayout(patient_h)
+        left_layout.addSpacing(16)
 
-        self.patient_id_entry = ctk.CTkEntry(self.card, placeholder_text="PAT-8821")
-        self.patient_id_entry.grid(row=0, column=1, padx=20, pady=(20, 10), sticky="ew")
+        self.drop_zone = FileDropZone()
+        self.drop_zone.setMinimumHeight(220)
+        self.drop_zone.file_dropped.connect(self._handle_file_selected)
+        self.drop_zone.clicked.connect(self.action_select_file)
+        left_layout.addWidget(self.drop_zone)
+        left_layout.addSpacing(16)
 
-        self.file_btn = ctk.CTkButton(
-            self.card,
-            text="Select File (PDF / DICOM)",
-            command=self.action_select_file,
-            fg_color="transparent",
-            border_width=1
-        )
-        self.file_btn.grid(row=1, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.hide()
+        left_layout.addWidget(self.progress_bar)
 
-        self.file_label = ctk.CTkLabel(
-            self.card,
-            text="No file selected",
-            text_color=theme_color("#475569", "#e5e7eb")
-        )
-        self.file_label.grid(row=2, column=0, columnspan=2, pady=(0, 10))
+        self.upload_btn = QPushButton("Encrypt & Secure Upload")
+        self.upload_btn.setMinimumHeight(42)
+        self.upload_btn.setEnabled(False)
+        self.upload_btn.clicked.connect(self.action_upload)
+        left_layout.addWidget(self.upload_btn)
+        
+        left_layout.addStretch()
 
-        self.upload_btn = ctk.CTkButton(self.card, text="Encrypt & Upload", command=self.action_upload, state="disabled")
-        self.upload_btn.grid(row=3, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="ew")
+        # Right Column: History List (Cards)
+        right_col = QWidget()
+        right_col.setMinimumWidth(300)
+        right_col.setMaximumWidth(400)
+        right_layout = QVBoxLayout(right_col)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
-    # ---------------- Logs Tab ---------------- #
+        history_header = QLabel("Recent Uploads")
+        history_header.setObjectName("TabHeader")
+        right_layout.addWidget(history_header)
+        right_layout.addSpacing(8)
+
+        self.history_list = QListWidget()
+        self.history_list.setObjectName("HistoryList")
+        right_layout.addWidget(self.history_list)
+
+        layout.addWidget(left_col, stretch=2)
+        layout.addWidget(right_col, stretch=1)
 
     def _build_logs_tab(self):
-        self.logs_tab.grid_columnconfigure(0, weight=1)
-        self.logs_tab.grid_rowconfigure(0, weight=1)
+        layout = QVBoxLayout(self.logs_tab)
+        layout.setContentsMargins(16, 16, 16, 16)
+        
+        self.log_box = QPlainTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setObjectName("LogBox")
+        layout.addWidget(self.log_box)
 
-        self.log_box = ctk.CTkTextbox(
-            self.logs_tab,
-            font=ctk.CTkFont(family="Consolas", size=12),
-            fg_color=theme_color("#f1f5f9", "#0f172a"),
-            text_color=theme_color("#0f172a", "#38bdf8"),
-            border_width=1,
-            border_color=theme_color("#e5e7eb", "#1e293b")
-        )
-        self.log_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        self.log_box.configure(state="disabled")
-
-        self._write_log("System Boot: Security Kernel Ready.\n")
-
-    # ---------------- Settings Tab ---------------- #
+        self._thread_safe_log("System Boot: Security Kernel Ready.", "INFO")
 
     def _build_settings_tab(self):
-        self.settings_tab.grid_columnconfigure(0, weight=1)
+        layout = QVBoxLayout(self.settings_tab)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setAlignment(Qt.AlignTop)
 
-        self.settings_header = ctk.CTkLabel(
-            self.settings_tab,
-            text="Preferences",
-            font=ctk.CTkFont(size=22, weight="bold")
-        )
-        self.settings_header.grid(row=0, column=0, sticky="w", pady=(10, 20))
+        header = QLabel("Application Settings")
+        header.setObjectName("TabHeader")
+        layout.addWidget(header)
+        layout.addSpacing(24)
 
-        self.theme_switch = ctk.CTkSwitch(self.settings_tab, text="Dark Mode", command=self.toggle_theme)
-        self.theme_switch.select()
-        self.theme_switch.grid(row=1, column=0, sticky="w", pady=10)
+        # Appearance Controls
+        app_header = QLabel("Appearance")
+        app_header.setObjectName("SectionHeader")
+        layout.addWidget(app_header)
 
-        self.change_pass_btn = ctk.CTkButton(
-            self.settings_tab,
-            text="Change Password",
-            command=self.action_change_password,
-        )
-        self.change_pass_btn.grid(row=2, column=0, sticky="w", pady=10)
+        btn_text = "Switch to Light Mode" if self.is_dark_mode else "Switch to Dark Mode"
+        self.theme_btn = QPushButton(btn_text)
+        self.theme_btn.setMinimumHeight(38)
+        self.theme_btn.setMaximumWidth(200)
+        self.theme_btn.clicked.connect(self.action_toggle_theme)
+        layout.addWidget(self.theme_btn)
+        
+        layout.addSpacing(32)
 
-    # ---------------- Callbacks ---------------- #
+        # Network Controls
+        net_header = QLabel("Network Connection")
+        net_header.setObjectName("SectionHeader")
+        layout.addWidget(net_header)
 
-    def toggle_theme(self):
-        mode = "dark" if self.theme_switch.get() else "light"
-        ctk.set_appearance_mode(mode)
+        net_controls = QHBoxLayout()
+        
+        # Connect button gets a specific object name to style it green/red dynamically
+        self.connect_btn = QPushButton("Redo Handshake")
+        self.connect_btn.setObjectName("ConnectBtn")
+        self.connect_btn.setProperty("status", "offline")
+        self.connect_btn.setMinimumHeight(38)
+        self.connect_btn.setMaximumWidth(180)
+        self.connect_btn.clicked.connect(self.action_connect)
 
-    # ---------------- Logic ---------------- #
+        self.refresh_btn = QPushButton("Refresh Status")
+        self.refresh_btn.setMinimumHeight(38)
+        self.refresh_btn.setMaximumWidth(150)
+        self.refresh_btn.clicked.connect(lambda: self.action_connect())
+
+        net_controls.addWidget(self.connect_btn)
+        net_controls.addWidget(self.refresh_btn)
+        net_controls.addStretch()
+        layout.addLayout(net_controls)
+
+        layout.addSpacing(32)
+
+        # Security Controls
+        sec_header = QLabel("Account Security")
+        sec_header.setObjectName("SectionHeader")
+        layout.addWidget(sec_header)
+
+        self.change_pass_btn = QPushButton("Change Password")
+        self.change_pass_btn.setMinimumHeight(38)
+        self.change_pass_btn.setMaximumWidth(180)
+        self.change_pass_btn.clicked.connect(self.action_change_password)
+        layout.addWidget(self.change_pass_btn)
+        
+        layout.addStretch()
+
+    # ---- Theming & Animation ----
+
+    def action_toggle_theme(self):
+        self.is_dark_mode = not self.is_dark_mode
+        self.theme_btn.setText("Switch to Light Mode" if self.is_dark_mode else "Switch to Dark Mode")
+        
+        # Save setting globally
+        self.settings.setValue("theme/is_dark_mode", self.is_dark_mode)
+
+        # Grab current state for crossfade
+        pixmap = self.grab()
+
+        # Create an overlay
+        self.overlay = QLabel(self)
+        self.overlay.setPixmap(pixmap)
+        self.overlay.resize(self.size())
+        self.overlay.move(0, 0)
+        self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents) 
+        self.overlay.show()
+
+        # Apply the new theme underneath instantly
+        self._apply_theme(self.is_dark_mode)
+
+        # Animate the overlay fading out
+        self.effect = QGraphicsOpacityEffect(self.overlay)
+        self.overlay.setGraphicsEffect(self.effect)
+        
+        self.anim = QPropertyAnimation(self.effect, b"opacity")
+        self.anim.setDuration(450) # Smooth 450ms fade
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
+        
+        # Cleanup when done
+        self.anim.finished.connect(self.overlay.deleteLater)
+        self.anim.start()
+
+    def _apply_theme(self, dark_mode: bool):
+        font_family = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        
+        if dark_mode:
+            self.setStyleSheet(f"""
+                QMainWindow {{ background-color: #1C1C1E; color: #EBEBF5; }}
+                QWidget#TopBar {{ background-color: #242426; border-bottom: 1px solid #38383A; }}
+                QWidget#Workspace {{ background-color: #1C1C1E; }}
+                
+                QLabel {{ color: #EBEBF5; font-family: {font_family}; }}
+                QLabel#AppTitle {{ color: #FFFFFF; font-size: 16px; font-weight: 600; }}
+                QLabel#TabHeader {{ color: #FFFFFF; font-size: 18px; font-weight: 600; }}
+                QLabel#SectionHeader {{ color: #EBEBF5; font-size: 13px; font-weight: 600; }}
+                QLabel#StandardLabel {{ color: #EBEBF5; font-size: 13px; font-weight: 500; }}
+                
+                QLabel#DropIcon {{ color: #8E8E93; }}
+                QLabel#DropText {{ color: #8E8E93; font-size: 14px; }}
+                
+                /* Muted connection labels */
+                QLabel#StatusLabelOffline {{ color: #D9534F; }}
+                QLabel#StatusLabelOnline {{ color: #5CB85C; }}
+                
+                QTabWidget::pane {{ 
+                    border: 1px solid #38383A; 
+                    background: #2C2C2E; 
+                    border-radius: 10px; 
+                }}
+                QTabBar::tab {{ 
+                    background: #1C1C1E; 
+                    color: #8E8E93;
+                    border: 1px solid #38383A; 
+                    border-bottom: none;
+                    padding: 10px 20px; 
+                    margin-right: 4px;
+                    border-top-left-radius: 6px; 
+                    border-top-right-radius: 6px; 
+                    font-size: 13px;
+                    font-weight: 500;
+                    font-family: {font_family};
+                }}
+                QTabBar::tab:selected {{ 
+                    background: #2C2C2E; 
+                    color: #FFFFFF; 
+                    border-top: 2px solid #557A8A; /* Soft slate accent */
+                }}
+                QTabBar::tab:hover:!selected {{ background: #242426; }}
+
+                QLineEdit {{ 
+                    padding: 10px 12px; 
+                    background: #1C1C1E; 
+                    color: #EBEBF5; 
+                    border: 1px solid #38383A; 
+                    border-radius: 6px; 
+                    font-size: 14px;
+                    font-family: {font_family};
+                }}
+                QLineEdit:focus {{ border: 1px solid #557A8A; background: #242426; }}
+
+                QFrame#DropZone {{ 
+                    border: 2px dashed #48484A; 
+                    border-radius: 12px; 
+                    background: #242426; 
+                }}
+                QFrame#DropZone:hover, QFrame#DropZone[dragHover="true"] {{ 
+                    border-color: #557A8A; 
+                    background: #2A363B; /* Subtle slate tint */
+                }}
+
+                /* All standard buttons use a soft, muted slate/teal tone */
+                QPushButton {{ 
+                    padding: 8px 16px; 
+                    background-color: #374F59; 
+                    color: #EBEBF5; 
+                    border: 1px solid #456370; 
+                    border-radius: 6px; 
+                    font-weight: 500; 
+                    font-family: {font_family};
+                }}
+                QPushButton:hover {{ background-color: #456370; border-color: #557A8A; }}
+                QPushButton:pressed {{ background-color: #2D424A; }}
+                QPushButton:disabled {{ background-color: #2C2C2E; color: #636366; border-color: #38383A; }}
+
+                /* Connection status dynamic button styling */
+                QPushButton#ConnectBtn[status="online"] {{ 
+                    background-color: #2E503B; /* Muted graphite green */
+                    border-color: #3A664A; 
+                    color: #EBEBF5; 
+                }}
+                QPushButton#ConnectBtn[status="online"]:hover {{ background-color: #3A664A; }}
+                
+                QPushButton#ConnectBtn[status="offline"] {{ 
+                    background-color: #5C3232; /* Muted warm red */
+                    border-color: #7A4242; 
+                    color: #EBEBF5; 
+                }}
+                QPushButton#ConnectBtn[status="offline"]:hover {{ background-color: #7A4242; }}
+
+                QProgressBar {{ 
+                    border: none; 
+                    background-color: #3A3A3C; 
+                    border-radius: 4px; 
+                }}
+                QProgressBar::chunk {{ 
+                    background-color: #557A8A; /* Soft slate accent */
+                    border-radius: 4px; 
+                }}
+
+                QListWidget#HistoryList {{ 
+                    background: transparent; 
+                    border: none;
+                    outline: none;
+                }}
+                QListWidget#HistoryList::item {{ 
+                    background: #242426;
+                    padding: 14px; 
+                    margin-bottom: 8px;
+                    border: 1px solid #38383A; 
+                    border-radius: 8px;
+                    color: #EBEBF5;
+                    font-family: {font_family};
+                }}
+                QListWidget#HistoryList::item:selected, QListWidget#HistoryList::item:hover {{ 
+                    background: #2A363B; 
+                    border-color: #456370; 
+                }}
+
+                QPlainTextEdit#LogBox {{ 
+                    background-color: #1C1C1E; 
+                    color: #D1D1D6; 
+                    border: 1px solid #38383A; 
+                    border-radius: 8px; 
+                    padding: 12px;
+                    font-family: "SF Mono", Consolas, monospace;
+                    font-size: 13px;
+                }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QMainWindow {{ background-color: #F5F5F7; color: #1D1D1F; }}
+                QWidget#TopBar {{ background-color: #FFFFFF; border-bottom: 1px solid #E5E5EA; }}
+                QWidget#Workspace {{ background-color: #F5F5F7; }}
+                
+                QLabel {{ color: #1D1D1F; font-family: {font_family}; }}
+                QLabel#AppTitle {{ color: #1D1D1F; font-size: 16px; font-weight: 600; }}
+                QLabel#TabHeader {{ color: #1D1D1F; font-size: 18px; font-weight: 600; }}
+                QLabel#SectionHeader {{ color: #1D1D1F; font-size: 13px; font-weight: 600; }}
+                QLabel#StandardLabel {{ color: #1D1D1F; font-size: 13px; font-weight: 500; }}
+                
+                QLabel#DropIcon {{ color: #8E8E93; }}
+                QLabel#DropText {{ color: #8E8E93; font-size: 14px; }}
+                
+                QLabel#StatusLabelOffline {{ color: #D9534F; }}
+                QLabel#StatusLabelOnline {{ color: #5CB85C; }}
+                
+                QTabWidget::pane {{ 
+                    border: 1px solid #E5E5EA; 
+                    background: #FFFFFF; 
+                    border-radius: 10px; 
+                }}
+                QTabBar::tab {{ 
+                    background: #F5F5F7; 
+                    color: #8E8E93;
+                    border: 1px solid #E5E5EA; 
+                    border-bottom: none;
+                    padding: 10px 20px; 
+                    margin-right: 4px;
+                    border-top-left-radius: 6px; 
+                    border-top-right-radius: 6px; 
+                    font-size: 13px;
+                    font-weight: 500;
+                    font-family: {font_family};
+                }}
+                QTabBar::tab:selected {{ 
+                    background: #FFFFFF; 
+                    color: #1D1D1F; 
+                    border-top: 2px solid #A9BCC4; /* Soft slate accent */
+                }}
+                QTabBar::tab:hover:!selected {{ background: #E5E5EA; }}
+
+                QLineEdit {{ 
+                    padding: 10px 12px; 
+                    background: #FFFFFF; 
+                    color: #1D1D1F; 
+                    border: 1px solid #D1D1D6; 
+                    border-radius: 6px; 
+                    font-size: 14px;
+                    font-family: {font_family};
+                }}
+                QLineEdit:focus {{ border: 1px solid #A9BCC4; }}
+
+                QFrame#DropZone {{ 
+                    border: 2px dashed #C7C7CC; 
+                    border-radius: 12px; 
+                    background: #F2F2F7; 
+                }}
+                QFrame#DropZone:hover, QFrame#DropZone[dragHover="true"] {{ 
+                    border-color: #A9BCC4; 
+                    background: #E8EEF0; /* Subtle slate tint */
+                }}
+
+                /* All standard buttons use a softly tinted accent surface */
+                QPushButton {{ 
+                    padding: 8px 16px; 
+                    background-color: #D3DCE0; 
+                    color: #1D1D1F; 
+                    border: 1px solid #C4D0D6; 
+                    border-radius: 6px; 
+                    font-weight: 500; 
+                    font-family: {font_family};
+                }}
+                QPushButton:hover {{ background-color: #C4D0D6; border-color: #A9BCC4; }}
+                QPushButton:pressed {{ background-color: #B5C4CB; }}
+                QPushButton:disabled {{ background-color: #E5E5EA; color: #8E8E93; border-color: #D1D1D6; }}
+                
+                /* Connection status dynamic button styling */
+                QPushButton#ConnectBtn[status="online"] {{ 
+                    background-color: #CDE3D5; /* Soft tinted green */
+                    border-color: #B2CDBE; 
+                }}
+                QPushButton#ConnectBtn[status="online"]:hover {{ background-color: #B2CDBE; }}
+                
+                QPushButton#ConnectBtn[status="offline"] {{ 
+                    background-color: #F0D4D4; /* Soft tinted red */
+                    border-color: #E0BCBC; 
+                }}
+                QPushButton#ConnectBtn[status="offline"]:hover {{ background-color: #E0BCBC; }}
+
+                QProgressBar {{ 
+                    border: none; 
+                    background-color: #E5E5EA; 
+                    border-radius: 4px; 
+                }}
+                QProgressBar::chunk {{ 
+                    background-color: #A9BCC4; /* Soft slate accent */
+                    border-radius: 4px; 
+                }}
+
+                QListWidget#HistoryList {{ 
+                    background: transparent; 
+                    border: none;
+                    outline: none;
+                }}
+                QListWidget#HistoryList::item {{ 
+                    background: #FFFFFF;
+                    padding: 14px; 
+                    margin-bottom: 8px;
+                    border: 1px solid #E5E5EA; 
+                    border-radius: 8px;
+                    color: #1D1D1F;
+                    font-family: {font_family};
+                }}
+                QListWidget#HistoryList::item:selected, QListWidget#HistoryList::item:hover {{ 
+                    background: #E8EEF0; 
+                    border-color: #C4D0D6; 
+                }}
+
+                QPlainTextEdit#LogBox {{ 
+                    background-color: #F2F2F7; 
+                    color: #1D1D1F; 
+                    border: 1px solid #E5E5EA; 
+                    border-radius: 8px; 
+                    padding: 12px;
+                    font-family: "SF Mono", Consolas, monospace;
+                    font-size: 13px;
+                }}
+            """)
+
+    # ---- Logic Methods ----
+
+    def action_connect(self):
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.setText("Negotiating...")
+        self.agent.initiate_handshake()
 
     def set_connection_status(self, connected: bool):
         if connected:
-            self.status_label.configure(text="● Secure", text_color="#10b981")
-            self.connect_btn.configure(state="disabled", text="Connected")
+            self.status_label.setText("● Secure Connection")
+            self.status_label.setObjectName("StatusLabelOnline")
+            self.connect_btn.setProperty("status", "online")
         else:
-            self.status_label.configure(text="● Disconnected", text_color="#ef4444")
-            self.connect_btn.configure(state="normal", text="Connect")
+            self.status_label.setText("● Disconnected")
+            self.status_label.setObjectName("StatusLabelOffline")
+            self.connect_btn.setProperty("status", "offline")
+            
+        # Re-polish to apply dynamic object name colors
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+        
+        self.connect_btn.style().unpolish(self.connect_btn)
+        self.connect_btn.style().polish(self.connect_btn)
+        
+        self.connect_btn.setText("Handshake Active" if connected else "Redo Handshake")
+        self.connect_btn.setEnabled(True) 
         self._check_upload_state()
 
-    def _write_log(self, text, *_):
-        self.log_box.configure(state="normal")
-        self.log_box.insert("end", text)
-        self.log_box.configure(state="disabled")
-        self.log_box.see("end")
-
-    def action_connect(self):
-        self.connect_btn.configure(text="Connecting...", state="disabled")
-        self.agent.initiate_handshake()
-
     def action_select_file(self):
-        path = filedialog.askopenfilename(title="Select Medical Record")
+        path, _ = QFileDialog.getOpenFileName(self, "Select Medical Record")
         if path:
-            self.selected_file_path = path
-            self.file_label.configure(text=os.path.basename(path), text_color="white")
-            self._check_upload_state()
+            self._handle_file_selected(path)
+
+    def _handle_file_selected(self, file_path: str):
+        self.selected_file_path = file_path
+        filename = os.path.basename(file_path)
+        self.drop_zone.text_label.setText(f"Selected:\n{filename}")
+        self._check_upload_state()
 
     def _check_upload_state(self):
-        if self.agent.is_connected and self.selected_file_path and self.patient_id_entry.get():
-            self.upload_btn.configure(state="normal")
+        if self.agent.is_connected and self.selected_file_path and self.patient_id_entry.text().strip():
+            self.upload_btn.setEnabled(True)
         else:
-            self.upload_btn.configure(state="disabled")
+            self.upload_btn.setEnabled(False)
 
     def action_upload(self):
+        patient_id = self.patient_id_entry.text().strip()
+        filename = os.path.basename(self.selected_file_path)
+
         try:
-            form = UploadForm(patient_id=self.patient_id_entry.get(), filepath=self.selected_file_path)
-            self.upload_btn.configure(state="disabled", text="Uploading...")
+            form = UploadForm(patient_id=patient_id, filepath=self.selected_file_path)
+            
+            self.upload_btn.setEnabled(False)
+            self.upload_btn.setText("Encrypting & Uploading...")
+            self.progress_bar.show()
+            self.progress_bar.setRange(0, 0) # Indeterminate spinner
+            QApplication.processEvents()
+
             self.agent.process_and_upload(form)
+            
+            self.progress_bar.setRange(0, 1)
+            self.progress_bar.setValue(1) 
+            
+            # History card setup
+            item = QListWidgetItem(f"✅ {patient_id}\n📄 {filename}")
+            self.history_list.insertItem(0, item)
+
             self.selected_file_path = None
-            self.file_label.configure(text="No file selected", text_color="gray")
-            self.patient_id_entry.delete(0, 'end')
-            self.upload_btn.configure(text="Encrypt & Upload")
+            self.drop_zone.text_label.setText("Drag & Drop your record here\nor click to browse")
+            self.patient_id_entry.clear()
+            self.upload_btn.setText("Encrypt & Secure Upload")
+            
+            QTimer.singleShot(1500, self.progress_bar.hide)
+
         except Exception as e:
             self.append_log(f"Upload Error: {e}", "ERROR")
-            self.upload_btn.configure(text="Encrypt & Upload")
+            self.upload_btn.setText("Encrypt & Secure Upload")
+            self.progress_bar.hide()
+            
+            # Add an error history card
+            item = QListWidgetItem(f"❌ {patient_id} (Failed)\n📄 {filename}")
+            self.history_list.insertItem(0, item)
+            
+            QMessageBox.critical(self, "Upload Error", str(e))
 
     def action_change_password(self):
-        old_password = ctk.CTkInputDialog(
-            text="Enter current password:",
-            title="Change Password"
-        ).get_input()
-        if not old_password:
+        dlg = PasswordChangeDialog(self)
+        result = dlg.get_result()
+        if not result:
             return
-
-        new_password = ctk.CTkInputDialog(
-            text="Enter new password:",
-            title="Change Password"
-        ).get_input()
-        if not new_password:
-            return
-
-        confirm_password = ctk.CTkInputDialog(
-            text="Confirm new password:",
-            title="Change Password"
-        ).get_input()
-        if new_password != confirm_password:
-            messagebox.showerror("Password Mismatch", "New passwords do not match.")
-            return
+        old_password, new_password, confirm_password = result
 
         try:
             resp = requests.post(
                 f"{self.server_url}/api/doctor/auth/change-password",
-                params={
+                json={
                     "doctor_id": self.doctor_id,
                     "old_pass": old_password,
                     "new_pass": new_password,
@@ -284,26 +765,27 @@ class VaultQDoctorApp(ctk.CTkToplevel):
                 timeout=10,
                 **self.agent._tls_request_kwargs(),
             )
+            
             if resp.status_code != 200:
-                detail = resp.json().get("detail", "Failed to change password.")
-                messagebox.showerror("Change Password Failed", detail)
+                try:
+                    detail_payload = resp.json()
+                    detail = detail_payload.get("detail", "Failed to change password.")
+                except (json.JSONDecodeError, ValueError):
+                    detail = (resp.text or "Failed to change password.").strip()
+                QMessageBox.critical(self, "Change Password Failed", detail)
                 self.append_log(f"Password change rejected: {detail}", "WARNING")
                 return
 
-            # Keep local vault password aligned with server password post-change.
-            self.vault.change_password(self.doctor_id, old_password, new_password)
-            messagebox.showinfo("Password Updated", "Password changed successfully.")
-            self.append_log("Password changed successfully on server and local vault.", "SUCCESS")
+            try:
+                self.vault.change_password(self.doctor_id, old_password, new_password)
+            except Exception as vault_err:
+                QMessageBox.critical(self, "Local Vault Sync Failed", "Local vault update failed.")
+                return
+
+            QMessageBox.information(self, "Password Updated", "Password changed successfully.")
+            
         except Exception as e:
-            self.append_log(f"Password change error: {e}", "ERROR")
-            messagebox.showerror("Change Password Error", str(e))
-
-
-    def _auto_handshake(self):
-        self.append_log("Auto-initiating secure handshake...", "INFO")
-        self.action_connect()
-
-    # ---------------- Thread-safe UI bridge ---------------- #
+            QMessageBox.critical(self, "Change Password Error", str(e))
 
     def _thread_safe_log(self, text: str, level: str = "INFO"):
         self._ui_queue.put(("log", text, level))
@@ -313,34 +795,35 @@ class VaultQDoctorApp(ctk.CTkToplevel):
             while True:
                 item = self._ui_queue.get_nowait()
                 kind = item[0]
-
                 if kind == "log":
                     _, text, level = item
                     timestamp = time.strftime("%H:%M:%S")
                     formatted = f"[{timestamp}] [{level}] {text}\n"
+                    
+                    os.makedirs("doctor_app/logs", exist_ok=True)
                     with open("doctor_app/logs/doctor_app.log", "a") as f:
                         f.write(formatted)
-                    self._write_log(formatted)
-
+                    
+                    self.log_box.appendPlainText(formatted.strip())
+                    
                 elif kind == "status":
                     _, connected = item
                     self.set_connection_status(connected)
-
         except queue.Empty:
             pass
 
-        if self.winfo_exists() and not self._closing:
-            self.after(50, self._process_ui_queue)
+        if not self._closing:
+            QTimer.singleShot(50, self._process_ui_queue)
 
-    def _on_close(self):
+    def _auto_handshake(self):
+        self.append_log("Auto-initiating secure handshake...", "INFO")
+        self.action_connect()
+
+    def closeEvent(self, event):
         self._closing = True
-
         try:
-            # Tell your background agent to shut down cleanly
             if hasattr(self.agent, "shutdown"):
                 self.agent.shutdown()
         except Exception:
             pass
-
-        self.quit()     # stops Tk mainloop
-        self.destroy()
+        event.accept()
