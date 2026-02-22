@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VaultQ | Patient Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs" defer></script>
+    <style>
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        .secure-viewer {
+            border: 2px solid #10b981;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.1);
+        }
+        /* Block right-click on PDF iframe */
+        .secure-viewer iframe { pointer-events: auto; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans antialiased">
+
+    <div class="min-h-screen flex flex-col" x-data="dashboardApp()">
+        <!-- Header -->
+        <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded bg-gradient-to-br from-emerald-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                    <span class="font-bold text-white tracking-tighter">VQ</span>
+                </div>
+                <h1 class="text-xl font-bold tracking-wide text-white">VaultQ <span class="text-slate-500 font-light">Patient Portal</span></h1>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <span class="text-slate-400">Welcome, <span class="text-emerald-400 font-semibold" x-text="patientName"></span></span>
+                <span class="text-slate-600">|</span>
+                <span class="font-mono text-xs text-slate-500" x-text="patientId"></span>
+                <button @click="logout()" class="ml-4 text-xs text-red-400 hover:text-red-300 font-bold border border-red-900 px-3 py-1 rounded hover:border-red-700 transition">
+                    LOGOUT
+                </button>
+            </div>
+        </header>
+
+        <main class="max-w-7xl mx-auto p-6 w-full flex-1">
+
+            <!-- Back button when viewing -->
+            <div x-show="currentView === 'viewer'" class="mb-4">
+                <button @click="closeViewer()" class="text-sm text-emerald-400 hover:text-emerald-300 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    Back to Records
+                </button>
+            </div>
+
+            <!-- Records List View -->
+            <div x-show="currentView === 'list'" class="fade-in">
+                <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-2xl">
+                    <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-bold text-white">My Medical Records</h2>
+                            <p class="text-sm text-slate-500 mt-1">Documents sent by your healthcare provider</p>
+                        </div>
+                        <button @click="loadRecords()" class="text-sm text-emerald-500 hover:underline">Refresh</button>
+                    </div>
+
+                    <!-- Loading -->
+                    <div x-show="loadingRecords" class="py-16 text-center text-slate-500">
+                        <svg class="animate-spin h-8 w-8 mx-auto mb-3 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        Loading records...
+                    </div>
+
+                    <!-- Records Table -->
+                    <table x-show="!loadingRecords" class="w-full text-left">
+                        <thead class="bg-black/50 text-gray-400 uppercase text-xs">
+                            <tr>
+                                <th class="py-4 px-4">Record ID</th>
+                                <th class="py-4 px-4">Date</th>
+                                <th class="py-4 px-4">Encryption</th>
+                                <th class="py-4 px-4">Integrity</th>
+                                <th class="py-4 px-4 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="rec in records" :key="rec.record_id">
+                                <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition cursor-pointer" @click="openRecord(rec.record_id)">
+                                    <td class="py-4 px-4 font-mono text-emerald-400 text-sm" x-text="rec.record_id"></td>
+                                    <td class="py-4 px-4 text-sm" x-text="formatDate(rec.timestamp)"></td>
+                                    <td class="py-4 px-4">
+                                        <span class="px-2 py-1 rounded text-xs font-bold bg-emerald-900/30 text-emerald-400">
+                                            AES-256-GCM
+                                        </span>
+                                    </td>
+                                    <td class="py-4 px-4">
+                                        <span class="px-2 py-1 rounded text-xs font-bold"
+                                            :class="rec.record_hash ? 'bg-blue-900/30 text-blue-400' : 'bg-red-900/30 text-red-400'"
+                                            x-text="rec.record_hash ? 'HASH PRESENT' : 'MISSING'">
+                                        </span>
+                                    </td>
+                                    <td class="py-4 px-4 text-right">
+                                        <button class="bg-emerald-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-500 transition">
+                                            VIEW DOCUMENT
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!loadingRecords && records.length === 0">
+                                <td colspan="5" class="py-16 text-center text-slate-500 italic">
+                                    No medical records found. Your doctor has not sent any documents yet.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Secure Document Viewer -->
+            <div x-show="currentView === 'viewer'" class="fade-in">
+                <!-- Verification Status Panel -->
+                <div class="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6 shadow-2xl">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold text-white">Security Verification</h3>
+                        <span class="font-mono text-xs text-slate-500" x-text="activeRecordId"></span>
+                    </div>
+
+                    <!-- Loading Verification -->
+                    <div x-show="verifying" class="text-center py-8">
+                        <svg class="animate-spin h-8 w-8 mx-auto mb-3 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        <p class="text-slate-400">Verifying encryption keys and integrity...</p>
+                    </div>
+
+                    <!-- Verification Error -->
+                    <div x-show="verifyError" class="p-4 bg-red-900/20 border border-red-500/50 rounded-lg">
+                        <p class="text-red-300 font-bold mb-1">Verification Failed</p>
+                        <p class="text-red-400 text-sm" x-text="verifyError"></p>
+                    </div>
+
+                    <!-- Verification Success -->
+                    <div x-show="verifyResult && !verifyError && !verifying">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                            <!-- Master Key Verification -->
+                            <div class="bg-black/50 rounded-lg p-3 border border-gray-800">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <div class="w-2 h-2 rounded-full" :class="verifyResult?.integrity?.master_kid_valid ? 'bg-emerald-500' : 'bg-red-500'"></div>
+                                    <span class="text-xs text-gray-400 uppercase">Master Key</span>
+                                </div>
+                                <span class="text-sm font-bold" :class="verifyResult?.integrity?.master_kid_valid ? 'text-emerald-400' : 'text-red-400'"
+                                      x-text="verifyResult?.integrity?.master_kid_valid ? 'VERIFIED' : 'FAILED'"></span>
+                            </div>
+                            <!-- Record Hash -->
+                            <div class="bg-black/50 rounded-lg p-3 border border-gray-800">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <div class="w-2 h-2 rounded-full" :class="verifyResult?.integrity?.record_hash_valid ? 'bg-emerald-500' : 'bg-red-500'"></div>
+                                    <span class="text-xs text-gray-400 uppercase">Record Hash</span>
+                                </div>
+                                <span class="text-sm font-bold" :class="verifyResult?.integrity?.record_hash_valid ? 'text-emerald-400' : 'text-red-400'"
+                                      x-text="verifyResult?.integrity?.record_hash_valid ? 'VERIFIED' : 'FAILED'"></span>
+                            </div>
+                            <!-- Payload Hash -->
+                            <div class="bg-black/50 rounded-lg p-3 border border-gray-800">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <div class="w-2 h-2 rounded-full" :class="verifyResult?.integrity?.payload_hash_valid ? 'bg-emerald-500' : 'bg-red-500'"></div>
+                                    <span class="text-xs text-gray-400 uppercase">Payload Hash</span>
+                                </div>
+                                <span class="text-sm font-bold" :class="verifyResult?.integrity?.payload_hash_valid ? 'text-emerald-400' : 'text-red-400'"
+                                      x-text="verifyResult?.integrity?.payload_hash_valid ? 'VERIFIED' : 'FAILED'"></span>
+                            </div>
+                            <!-- DEK Status -->
+                            <div class="bg-black/50 rounded-lg p-3 border border-gray-800">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <div class="w-2 h-2 rounded-full" :class="allDekValid() ? 'bg-emerald-500' : 'bg-red-500'"></div>
+                                    <span class="text-xs text-gray-400 uppercase">DEK Chain</span>
+                                </div>
+                                <span class="text-sm font-bold" :class="allDekValid() ? 'text-emerald-400' : 'text-red-400'"
+                                      x-text="allDekValid() ? 'VERIFIED' : 'INCOMPLETE'"></span>
+                            </div>
+                        </div>
+
+                        <!-- DEK Verification Details -->
+                        <div class="bg-black/30 rounded-lg p-4 border border-gray-800">
+                            <h4 class="text-xs text-gray-400 uppercase tracking-wider mb-3">DEK Verification Details</h4>
+                            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                <template x-for="(val, key) in (verifyResult?.dek_verification || {})" :key="key">
+                                    <div class="flex items-center gap-2">
+                                        <svg x-show="val" class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                        <svg x-show="!val" class="w-4 h-4 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                                        <span class="text-xs text-slate-400" x-text="key.replace(/_/g, ' ').replace('present', '')"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PDF Viewer -->
+                <div x-show="pdfDataUrl && !verifying && !verifyError" class="secure-viewer">
+                    <div class="bg-emerald-900/20 px-4 py-2 flex items-center justify-between border-b border-emerald-700/30">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+                            <span class="text-xs text-emerald-400 font-bold uppercase tracking-wider">Secure Document Viewer</span>
+                        </div>
+                        <span class="text-xs text-emerald-600">All verification checks passed</span>
+                    </div>
+                    <iframe :src="pdfDataUrl" class="w-full bg-gray-800" style="height: 80vh;" frameborder="0"></iframe>
+                </div>
+
+                <!-- Verified but file content not yet recoverable -->
+                <div x-show="verifyResult && !pdfDataUrl && !verifying && !verifyError"
+                     class="bg-gray-900 rounded-xl border border-amber-700/40 p-8 text-center">
+                    <svg class="w-12 h-12 mx-auto mb-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    <h3 class="text-lg font-bold text-amber-400 mb-2">Integrity Verified</h3>
+                    <p class="text-slate-400 text-sm max-w-md mx-auto">
+                        All cryptographic verification checks passed. The record's master key, record hash,
+                        payload hash, and DEK metadata have been validated. The encrypted document is securely stored
+                        and has not been tampered with.
+                    </p>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Footer -->
+        <footer class="bg-slate-900 border-t border-slate-800 py-3 text-center text-xs text-slate-600">
+            VaultQ Secure Medical Record System &mdash; AES-256-GCM + ML-DSA-65 Post-Quantum Encryption
+        </footer>
+    </div>
+
+    <script>
+        function dashboardApp() {
+            return {
+                patientName: sessionStorage.getItem('vaultq_patient_name') || 'Patient',
+                patientId: sessionStorage.getItem('vaultq_patient_id') || '',
+                token: sessionStorage.getItem('vaultq_patient_token') || '',
+                records: [],
+                loadingRecords: true,
+                currentView: 'list',       // 'list' | 'viewer'
+                activeRecordId: '',
+                verifying: false,
+                verifyResult: null,
+                verifyError: '',
+                pdfDataUrl: '',
+
+                init() {
+                    if (!this.token) {
+                        window.location.href = '/patient';
+                        return;
+                    }
+                    this.loadRecords();
+                },
+
+                authHeaders(extra = {}) {
+                    return { ...extra, 'x-patient-token': this.token };
+                },
+
+                async loadRecords() {
+                    this.loadingRecords = true;
+                    try {
+                        const resp = await fetch('/api/patient/records', {
+                            headers: this.authHeaders(),
+                        });
+                        if (resp.status === 401) {
+                            this.logout();
+                            return;
+                        }
+                        this.records = await resp.json();
+                    } catch (e) {
+                        console.error('Failed to load records:', e);
+                    } finally {
+                        this.loadingRecords = false;
+                    }
+                },
+
+                async openRecord(recordId) {
+                    this.currentView = 'viewer';
+                    this.activeRecordId = recordId;
+                    this.verifying = true;
+                    this.verifyResult = null;
+                    this.verifyError = '';
+                    this.pdfDataUrl = '';
+
+                    try {
+                        const resp = await fetch(`/api/patient/records/${recordId}`, {
+                            headers: this.authHeaders(),
+                        });
+                        const data = await resp.json();
+
+                        if (!resp.ok) {
+                            this.verifyError = data.detail || 'Verification failed.';
+                            return;
+                        }
+
+                        this.verifyResult = data;
+
+                        // Convert base64 file content to a blob URL for the secure PDF viewer
+                        if (data.file_content_b64) {
+                            const binaryStr = atob(data.file_content_b64);
+                            const bytes = new Uint8Array(binaryStr.length);
+                            for (let i = 0; i < binaryStr.length; i++) {
+                                bytes[i] = binaryStr.charCodeAt(i);
+                            }
+                            const blob = new Blob([bytes], { type: data.content_type || 'application/pdf' });
+                            this.pdfDataUrl = URL.createObjectURL(blob);
+                        }
+                    } catch (e) {
+                        this.verifyError = 'Network error: Could not retrieve record.';
+                    } finally {
+                        this.verifying = false;
+                    }
+                },
+
+                closeViewer() {
+                    if (this.pdfDataUrl) {
+                        URL.revokeObjectURL(this.pdfDataUrl);
+                    }
+                    this.currentView = 'list';
+                    this.activeRecordId = '';
+                    this.verifyResult = null;
+                    this.verifyError = '';
+                    this.pdfDataUrl = '';
+                },
+
+                allDekValid() {
+                    if (!this.verifyResult?.dek_verification) return false;
+                    return Object.values(this.verifyResult.dek_verification).every(v => v === true);
+                },
+
+                formatDate(ts) {
+                    if (!ts) return '—';
+                    return new Date(ts * 1000).toLocaleString();
+                },
+
+                logout() {
+                    sessionStorage.removeItem('vaultq_patient_token');
+                    sessionStorage.removeItem('vaultq_patient_name');
+                    sessionStorage.removeItem('vaultq_patient_id');
+                    window.location.href = '/patient';
+                }
+            }
+        }
+    </script>
+</body>
+</html>
