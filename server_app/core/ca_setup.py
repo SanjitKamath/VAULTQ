@@ -13,23 +13,23 @@ OID_ML_DSA_65 = ObjectIdentifier("1.3.6.1.4.1.99999.1.1")
 def bootstrap_hospital_root_ca(ca_key_manager: DSAManager) -> x509.Certificate:
     """
     Generates a Self-Signed X.509 Root Certificate for the Hospital.
+    Persists the ML-DSA-65 keypair alongside the cert for cross-restart consistency.
     """
     cert_dir = Path(__file__).resolve().parents[1] / "storage" / "certs"
     cert_dir.mkdir(parents=True, exist_ok=True)
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     container_key_path = cert_dir / "hospital_root_ca.key"
+    ml_dsa_pk_path = cert_dir / "hospital_ca_ml_dsa.pub"
+    ml_dsa_sk_path = cert_dir / "hospital_ca_ml_dsa.key"
 
-    if root_cert_path.exists() and container_key_path.exists():
+    if root_cert_path.exists() and container_key_path.exists() and ml_dsa_sk_path.exists() and ml_dsa_pk_path.exists():
         with open(root_cert_path, "rb") as f:
             root_cert = x509.load_pem_x509_certificate(f.read())
         with open(container_key_path, "rb") as f:
             container_key = serialization.load_pem_private_key(f.read(), password=None)
         ca_key_manager.container_key = container_key
-        try:
-            ext = root_cert.extensions.get_extension_for_oid(OID_ML_DSA_65)
-            ca_key_manager.pk = ext.value.value
-        except Exception:
-            ca_key_manager.pk = ca_key_manager.pk
+        ca_key_manager.pk = ml_dsa_pk_path.read_bytes()
+        ca_key_manager.sk = ml_dsa_sk_path.read_bytes()
         return root_cert
 
     # Create a lightweight classical key strictly to satisfy the X509 container
@@ -77,7 +77,9 @@ def bootstrap_hospital_root_ca(ca_key_manager: DSAManager) -> x509.Certificate:
                 encryption_algorithm=serialization.NoEncryption(),
             )
         )
-    
+    ml_dsa_pk_path.write_bytes(ca_key_manager.pk)
+    ml_dsa_sk_path.write_bytes(ca_key_manager.sk)
+
     return root_cert
 
 

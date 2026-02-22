@@ -180,16 +180,19 @@ def receive_record(envelope: SecureEnvelope):
     stored_payload_b64 = base64.b64encode(stored_payload_bytes).decode()
     stored_payload_hash = sha256_hex(stored_payload_bytes)
     stored_timestamp = int(time.time())
-    record_hash = sha256_hex(
-        build_server_record_hash_message(
-            master_kid=state.master_kid,
-            timestamp=stored_timestamp,
-            patient_id=str(patient_id),
-            payload=stored_payload_b64,
-            payload_hash=stored_payload_hash,
-        )
+    record_hash_message = build_server_record_hash_message(
+        master_kid=state.master_kid,
+        timestamp=stored_timestamp,
+        patient_id=str(patient_id),
+        payload=stored_payload_b64,
+        payload_hash=stored_payload_hash,
     )
-    
+    record_hash = sha256_hex(record_hash_message)
+
+    # Hospital signs the record with its ML-DSA-65 CA key (rotation-safe: pub key embedded)
+    hospital_signature = state.hospital_ca.sign(record_hash_message)
+    audit.info("Hospital ML-DSA-65 signature applied to record for patient_id=%s", patient_id)
+
     stored_envelope = StoredVaultEnvelope(
         master_kid=state.master_kid,
         timestamp=stored_timestamp,
@@ -197,6 +200,9 @@ def receive_record(envelope: SecureEnvelope):
         payload=stored_payload_b64,
         payload_hash=stored_payload_hash,
         record_hash=record_hash,
+        hospital_signature=base64.b64encode(hospital_signature).decode(),
+        hospital_pub=base64.b64encode(state.hospital_ca.get_public_bytes()).decode(),
+        hospital_sig_alg="ML-DSA-65",
     )
 
     # --- 4. STORE UNDER vault/<patient_id>/ ---

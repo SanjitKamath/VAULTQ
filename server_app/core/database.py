@@ -33,6 +33,7 @@ class VaultQDatabase:
         self.db_file = base_dir/ "storage" / "hospital_vault.json"
         self.doctors = {}
         self.certificates = {}
+        self.patients = {}
         self.audit.info("DB init: loading vault database from %s", self.db_file)
         self.load_db()
 
@@ -47,25 +48,29 @@ class VaultQDatabase:
                 data = json.load(f)
                 self.doctors = data.get("doctors", {})
                 self.certificates = data.get("certificates", {})
+                self.patients = data.get("patients", {})
                 self.audit.info(
-                    "DB load: completed (doctors=%s certificates=%s)",
+                    "DB load: completed (doctors=%s certificates=%s patients=%s)",
                     len(self.doctors),
                     len(self.certificates),
+                    len(self.patients),
                 )
         except Exception as e:
             self.audit.exception("DB load error: %s", str(e))
 
     def save_db(self):
-        self.db_file.parent.mkdir(parents=True, exist_ok=True)  
+        self.db_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.db_file, "w") as f:
             json.dump({
-                "doctors": self.doctors, 
-                "certificates": self.certificates
+                "doctors": self.doctors,
+                "certificates": self.certificates,
+                "patients": self.patients,
             }, f, indent=4)
         self.audit.info(
-            "DB save: persisted (doctors=%s certificates=%s)",
+            "DB save: persisted (doctors=%s certificates=%s patients=%s)",
             len(self.doctors),
             len(self.certificates),
+            len(self.patients),
         )
             
     def get_all_doctors(self):
@@ -174,6 +179,35 @@ class VaultQDatabase:
         if not candidates:
             return None
         return max(candidates, key=lambda c: float(c.get("expires_at", 0)))
+
+    # ── Patient Operations ────────────────────────────────────────────
+
+    def add_patient(self, patient_id: str, name: str, password: str):
+        self.patients[patient_id] = {
+            "id": patient_id,
+            "name": name,
+            "password": password,
+            "status": "active",
+        }
+        self.audit.info("DB add_patient: patient_id=%s name=%s", patient_id, name)
+        self.save_db()
+
+    def get_all_patients(self):
+        results = []
+        for pat_id, data in self.patients.items():
+            data["id"] = pat_id
+            results.append(data)
+        return results
+
+    def delete_patient(self, patient_id: str):
+        if patient_id in self.patients:
+            del self.patients[patient_id]
+            self.audit.info("DB delete_patient: patient_id=%s removed", patient_id)
+            self.save_db()
+            return True
+        self.audit.warning("DB delete_patient: patient_id not found (%s)", patient_id)
+        return False
+
 
 # Instantiate the global database object
 db = VaultQDatabase()

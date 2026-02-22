@@ -40,3 +40,6 @@ class StoredVaultEnvelope(BaseModel):
     payload: str
     payload_hash: str       # SHA-256 of decoded payload bytes (nonce||ciphertext)
     record_hash: str        # SHA-256 over canonical record metadata + payload
+    hospital_signature: str # ML-DSA-65 signature over canonical record message
+    hospital_pub: str       # Hospital public key at time of signing (rotation-safe)
+    hospital_sig_alg: str   # Algorithm identifier (e.g. "ML-DSA-65")

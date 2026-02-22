@@ -55,6 +55,80 @@
                 </div>
             </div>
 
+            <!-- Patient Provisioning Section -->
+            <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
+                <h3 class="text-xl font-bold mb-4 text-emerald-400">Provision New Patient</h3>
+                <p class="text-gray-400 text-sm mb-4">Enter the patient's name to generate their VaultQ portal credentials.</p>
+                <div class="flex gap-4">
+                    <input type="text" x-model="newPatientName" placeholder="Patient's Full Name"
+                        class="bg-black border border-gray-700 p-3 rounded-lg flex-1 text-white focus:border-emerald-500 outline-none">
+                    <button @click="provisionPatient()"
+                            class="bg-emerald-600 px-8 py-3 rounded-lg font-bold hover:bg-emerald-500 transition-all">
+                        Generate Credentials
+                    </button>
+                </div>
+                <div x-show="lastProvisionedPatient" x-transition class="mt-6 p-4 bg-emerald-900/20 border border-emerald-500/50 rounded-lg">
+                    <h4 class="font-bold text-emerald-300 mb-2">Patient Credentials Created!</h4>
+                    <p class="text-sm text-gray-300 mb-2">Provide these to the patient for portal login:</p>
+                    <div class="grid grid-cols-2 gap-4 bg-black p-3 rounded border border-gray-800">
+                        <div>
+                            <span class="text-xs text-gray-500 block uppercase">Patient ID</span>
+                            <span class="font-mono text-lg text-white" x-text="lastProvisionedPatient?.id"></span>
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-500 block uppercase">Temporary Password</span>
+                            <span class="font-mono text-lg text-yellow-400" x-text="lastProvisionedPatient?.password"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Patient Table -->
+            <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl mb-8">
+                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                    <h2 class="text-xl font-bold">Registered Patients</h2>
+                    <button @click="refresh()" class="text-sm text-emerald-500 hover:underline">Refresh</button>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
+                        <tr>
+                            <th class="py-4 px-4">Patient ID</th>
+                            <th class="py-4 px-4">Name</th>
+                            <th class="py-4 px-4">Status</th>
+                            <th class="py-4 px-4">Password</th>
+                            <th class="py-4 px-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="pat in patients" :key="pat.id">
+                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
+                                <td class="py-4 px-4 font-mono text-emerald-400" x-text="pat.id"></td>
+                                <td class="py-4 px-4 font-bold" x-text="pat.name"></td>
+                                <td class="py-4 px-4">
+                                    <span class="px-2 py-1 rounded text-xs uppercase font-bold bg-green-900/30 text-green-400" x-text="pat.status"></span>
+                                </td>
+                                <td class="py-4 px-4">
+                                    <span class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 font-mono text-xs tracking-wider text-slate-300">HASHED ONLY</span>
+                                </td>
+                                <td class="py-4 px-4 text-right">
+                                    <button @click="updatePatientPassword(pat.id)"
+                                            class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
+                                        CHANGE PASSWORD
+                                    </button>
+                                    <button @click="deletePatient(pat.id)"
+                                            class="text-xs text-red-500 hover:text-red-400 font-bold">
+                                        DELETE
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr x-show="patients.length === 0">
+                            <td colspan="5" class="py-12 text-center text-slate-500 italic">No patients provisioned yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
             <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
                 <div class="p-6 border-b border-gray-800 flex justify-between items-center">
                     <h2 class="text-xl font-bold">Authorized Personnel</h2>
@@ -124,11 +198,14 @@
     <script>
         function adminApp() {
             return {
-                stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, ca_algorithm: '...' },
+                stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, total_patients: 0, ca_algorithm: '...' },
                 doctors: [],
+                patients: [],
                 adminToken: localStorage.getItem('vaultq_admin_token') || '',
-                newDocName: '',        
-                lastProvisioned: null, 
+                newDocName: '',
+                lastProvisioned: null,
+                newPatientName: '',
+                lastProvisionedPatient: null,
 
                 init() {
                     if (!this.adminToken) {
@@ -147,12 +224,14 @@
 
                 async refresh() {
                     try {
-                        const [statsRes, docsRes] = await Promise.all([
+                        const [statsRes, docsRes, patsRes] = await Promise.all([
                             fetch('/api/admin/stats', { headers: this.authHeaders() }),
                             fetch('/api/admin/doctors', { headers: this.authHeaders() }),
+                            fetch('/api/patient/admin/list', { headers: this.authHeaders() }),
                         ]);
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
+                        this.patients = await patsRes.json();
                     } catch (e) {
                         console.error("Failed to refresh dashboard:", e);
                     }
@@ -269,9 +348,64 @@
                             headers: this.authHeaders(),
                         });
                         if (resp.ok) {
-                            await this.refresh(); 
+                            await this.refresh();
                         } else {
                             alert("Failed to delete doctor.");
+                        }
+                    }
+                },
+
+                // ── Patient Management ──────────────────────────
+                async provisionPatient() {
+                    if (!this.newPatientName) return;
+                    try {
+                        const resp = await fetch(`/api/patient/admin/provision?name=${encodeURIComponent(this.newPatientName)}`, {
+                            method: 'POST',
+                            headers: this.authHeaders(),
+                        });
+                        if (resp.ok) {
+                            this.lastProvisionedPatient = await resp.json();
+                            this.newPatientName = '';
+                            await this.refresh();
+                        } else {
+                            alert("Server Error: Could not provision patient.");
+                        }
+                    } catch (e) {
+                        alert("Network error: " + e.message);
+                    }
+                },
+
+                async updatePatientPassword(patientId) {
+                    const newPassword = prompt(`Enter a new password for ${patientId}:`);
+                    if (newPassword === null) return;
+                    if (!newPassword.trim()) { alert("Password cannot be empty."); return; }
+                    try {
+                        const resp = await fetch(`/api/patient/admin/${patientId}/password`, {
+                            method: 'PUT',
+                            headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ password: newPassword.trim() })
+                        });
+                        if (!resp.ok) {
+                            const err = await resp.json().catch(() => ({}));
+                            alert(err.detail || "Failed to update password.");
+                            return;
+                        }
+                        alert("Patient password updated successfully.");
+                    } catch (e) {
+                        alert("Network error while updating password.");
+                    }
+                },
+
+                async deletePatient(id) {
+                    if (confirm(`Permanently delete patient ${id}?`)) {
+                        const resp = await fetch(`/api/patient/admin/${id}`, {
+                            method: 'DELETE',
+                            headers: this.authHeaders(),
+                        });
+                        if (resp.ok) {
+                            await this.refresh();
+                        } else {
+                            alert("Failed to delete patient.");
                         }
                     }
                 }
