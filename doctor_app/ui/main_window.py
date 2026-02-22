@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QFrame, QProgressBar, QListWidget, QListWidgetItem, QGraphicsOpacityEffect
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QSettings
-from PySide6.QtGui import QFont, QCursor
+from PySide6.QtGui import QFont, QCursor, QIcon
 
 from doctor_app.core.config import config
 from doctor_app.core.models import UploadForm
@@ -141,6 +141,9 @@ class VaultQDoctorApp(QMainWindow):
         self._ui_queue = queue.Queue()
 
         self.setWindowTitle("VaultQ – Doctor Portal")
+
+        self.setWindowIcon(QIcon("doctor_app/assets/icon.ico"))
+
         self.resize(1050, 700)
         self._center_window()
         self._build_ui()
@@ -181,7 +184,7 @@ class VaultQDoctorApp(QMainWindow):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(24, 0, 24, 0)
 
-        self.title_label = QLabel("VaultQ Workspace")
+        self.title_label = QLabel("VaultQ Doctor Portal")
         self.title_label.setObjectName("AppTitle")
 
         self.status_label = QLabel("● Disconnected")
@@ -309,7 +312,7 @@ class VaultQDoctorApp(QMainWindow):
         app_header.setObjectName("SectionHeader")
         layout.addWidget(app_header)
 
-        btn_text = "Switch to Light Mode" if self.is_dark_mode else "Switch to Dark Mode"
+        btn_text = "Light Mode" if self.is_dark_mode else "Dark Mode"
         self.theme_btn = QPushButton(btn_text)
         self.theme_btn.setMinimumHeight(38)
         self.theme_btn.setMaximumWidth(200)
@@ -362,7 +365,7 @@ class VaultQDoctorApp(QMainWindow):
 
     def action_toggle_theme(self):
         self.is_dark_mode = not self.is_dark_mode
-        self.theme_btn.setText("Switch to Light Mode" if self.is_dark_mode else "Switch to Dark Mode")
+        self.theme_btn.setText("Light Mode" if self.is_dark_mode else "Dark Mode")
         
         # Save setting globally
         self.settings.setValue("theme/is_dark_mode", self.is_dark_mode)

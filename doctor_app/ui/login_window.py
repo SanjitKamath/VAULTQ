@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QInputDialog, QGraphicsDropShadowEffect
 )
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QPoint, Property, QRectF
-from PySide6.QtGui import QFont, QCursor, QColor, QPainter, QPen
+from PySide6.QtGui import QFont, QCursor, QColor, QPainter, QPen, QIcon
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
@@ -89,7 +89,9 @@ class LoginWindow(QMainWindow):
 
         self.vault = LocalKeyVault()
 
-        self.setWindowTitle("VaultQ – Authentication")
+        self.setWindowTitle("Login - VaultQ Doctor Portal")
+
+        self.setWindowIcon(QIcon("doctor_app/assets/icon.png"))
         
         # Enforce fixed size and completely disable the OS maximize button
         self.setFixedSize(440, 520)
@@ -171,7 +173,7 @@ class LoginWindow(QMainWindow):
         title.setObjectName("AppTitle")
         title.setAlignment(Qt.AlignCenter)
         
-        subtitle = QLabel("Secure Workspace")
+        subtitle = QLabel("Doctor Portal Login")
         subtitle.setObjectName("Subtitle")
         subtitle.setAlignment(Qt.AlignCenter)
 
