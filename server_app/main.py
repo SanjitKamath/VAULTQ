@@ -7,7 +7,15 @@ from fastapi.responses import HTMLResponse
 from .core.ca_setup import ensure_server_tls_artifacts
 
 app = FastAPI(title="VaultQ Core Server")
-MAX_UPLOAD_BYTES = int(os.getenv("VAULTQ_MAX_UPLOAD_BYTES", "8388608"))  # 8 MiB default
+_MAX_UPLOAD_BYTES_RAW = os.getenv("VAULTQ_MAX_UPLOAD_BYTES", "").strip()
+if not _MAX_UPLOAD_BYTES_RAW:
+    _MAX_UPLOAD_BYTES_RAW = "8388608"  # 8 MiB default
+try:
+    MAX_UPLOAD_BYTES = int(_MAX_UPLOAD_BYTES_RAW)
+except ValueError as exc:
+    raise ValueError(
+        f"Invalid VAULTQ_MAX_UPLOAD_BYTES value: {_MAX_UPLOAD_BYTES_RAW!r}. Expected a numeric byte limit."
+    ) from exc
 REQUIRE_MTLS = os.getenv("VAULTQ_REQUIRE_MTLS", "0") == "1"
 
 # Define template directory for the admin dashboard

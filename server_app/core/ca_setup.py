@@ -1,5 +1,6 @@
 import datetime
 import ipaddress
+import os
 from pathlib import Path
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ObjectIdentifier
@@ -9,6 +10,19 @@ from cryptography.hazmat.primitives import serialization
 from security_suite.crypto.primitive_dsa import DSAManager
 
 OID_ML_DSA_65 = ObjectIdentifier("1.3.6.1.4.1.99999.1.1")
+
+
+def _write_secure_bytes(path: Path, data: bytes) -> None:
+    flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+    finally:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
 
 def _cert_dir() -> Path:
@@ -21,10 +35,15 @@ def bootstrap_hospital_root_ca() -> x509.Certificate:
     """
     cert_dir = _cert_dir()
     cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(cert_dir, 0o700)
+    except OSError:
+        pass
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     container_key_path = cert_dir / "hospital_root_ca.key"
+    pqc_private_key_path = cert_dir / "hospital_root_ca_ml_dsa.key"
 
-    if root_cert_path.exists() and container_key_path.exists():
+    if root_cert_path.exists() and container_key_path.exists() and pqc_private_key_path.exists():
         with open(root_cert_path, "rb") as f:
             root_cert = x509.load_pem_x509_certificate(f.read())
         return root_cert
@@ -32,6 +51,7 @@ def bootstrap_hospital_root_ca() -> x509.Certificate:
     # Generate a one-time PQC identity public key to embed in the CA cert extension.
     ephemeral_ca_identity = DSAManager(private_bytes=None)
     ephemeral_ca_identity.generate_keypair()
+    pqc_private_key = ephemeral_ca_identity.get_private_bytes()
 
     # Create a lightweight classical key strictly to satisfy the X509 container
     container_key = ec.generate_private_key(ec.SECP256R1())
@@ -65,16 +85,16 @@ def bootstrap_hospital_root_ca() -> x509.Certificate:
         algorithm=hashes.SHA256()
     )
     
-    with open(root_cert_path, "wb") as f:
-        f.write(root_cert.public_bytes(serialization.Encoding.PEM))
-    with open(container_key_path, "wb") as f:
-        f.write(
-            container_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
+    _write_secure_bytes(root_cert_path, root_cert.public_bytes(serialization.Encoding.PEM))
+    _write_secure_bytes(
+        container_key_path,
+        container_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ),
+    )
+    _write_secure_bytes(pqc_private_key_path, pqc_private_key)
     
     return root_cert
 
@@ -87,21 +107,24 @@ def load_hospital_ca_signer() -> DSAManager:
     cert_dir = _cert_dir()
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     container_key_path = cert_dir / "hospital_root_ca.key"
+    pqc_private_key_path = cert_dir / "hospital_root_ca_ml_dsa.key"
 
-    if not root_cert_path.exists() or not container_key_path.exists():
+    if not root_cert_path.exists() or not container_key_path.exists() or not pqc_private_key_path.exists():
         raise RuntimeError("Hospital CA artifacts are missing.")
 
     with open(root_cert_path, "rb") as f:
         root_cert = x509.load_pem_x509_certificate(f.read())
     with open(container_key_path, "rb") as f:
         container_key = serialization.load_pem_private_key(f.read(), password=None)
+    with open(pqc_private_key_path, "rb") as f:
+        pqc_private_key = f.read()
 
-    signer = DSAManager(private_bytes=None)
+    signer = DSAManager(private_bytes=pqc_private_key)
     signer.container_key = container_key
     try:
         ext = root_cert.extensions.get_extension_for_oid(OID_ML_DSA_65)
         signer.pk = ext.value.value
-    except Exception:
+    except x509.ExtensionNotFound:
         signer.pk = None
     return signer
 

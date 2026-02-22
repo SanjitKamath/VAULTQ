@@ -1,6 +1,7 @@
 import base64
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization
 import time
@@ -48,7 +49,10 @@ def _issue_certificate_for_doctor(doc: dict):
         raise HTTPException(status_code=400, detail="CSR subject does not match doctor identity.")
 
     # Ensure required PQC extension exists in CSR.
-    extract_pqc_public_key_from_csr(doctor_csr)
+    try:
+        extract_pqc_public_key_from_csr(doctor_csr)
+    except (ValueError, x509.ExtensionNotFound):
+        raise HTTPException(status_code=400, detail="CSR missing or invalid PQC extension.")
 
     issuer_key = load_hospital_ca_signer()
     try:
@@ -146,7 +150,10 @@ def onboard_doctor(payload: OnboardRequest):
             raise HTTPException(status_code=400, detail="CSR subject does not match doctor identity.")
 
         # Ensure PQC extension is present and store it for admin UI visibility.
-        pqc_pub_bytes = extract_pqc_public_key_from_csr(doctor_csr)
+        try:
+            pqc_pub_bytes = extract_pqc_public_key_from_csr(doctor_csr)
+        except (ValueError, x509.ExtensionNotFound):
+            raise HTTPException(status_code=400, detail="CSR missing or invalid PQC extension.")
         tls_pub_pem = doctor_csr.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,

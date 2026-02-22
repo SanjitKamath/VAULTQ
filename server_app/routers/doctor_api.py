@@ -2,7 +2,9 @@ import os
 import json
 import base64
 import time
+from typing import Literal
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from cryptography.x509.oid import NameOID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -12,6 +14,7 @@ from security_suite.security.integrity import (
     sha256_hex,
     build_doctor_signature_message,
     build_server_record_hash_message,
+    ServerVaultEnvelope,
 )
 from security_suite.crypto import DSAManager
 from security_suite.security.certificates import (
@@ -29,18 +32,36 @@ from ..core.integrity_audit import append_integrity_event
 router = APIRouter(prefix="/api/doctor", tags=["Doctor Operations"])
 audit = get_audit_logger()
 
+
+class PasswordChangeRequest(BaseModel):
+    doctor_id: str
+    old_pass: str
+    new_pass: str
+
+
+def parse_int_env(var_name: str, default: int) -> int:
+    raw = os.getenv(var_name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        audit.warning("Invalid %s=%r; using default %s", var_name, raw, default)
+        return default
+
+
 # Create the secure storage directory
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "storage", "vault")
 os.makedirs(STORAGE_DIR, mode=0o700, exist_ok=True)
 MAX_CLOCK_SKEW_SECONDS = 300
 REPLAY_CACHE_TTL_SECONDS = 900
-STORED_ENVELOPE_VERSION = "v2"
-STORED_PAYLOAD_CIPHER_ALG = "AES-256-GCM"
-STORED_KEY_WRAP_ALG = "AES-256-GCM"
-MAX_B64_PAYLOAD_BYTES = int(os.getenv("VAULTQ_MAX_B64_PAYLOAD_BYTES", "11184812"))  # ~8 MiB decoded
-MAX_B64_SIGNATURE_BYTES = int(os.getenv("VAULTQ_MAX_B64_SIGNATURE_BYTES", "32768"))
-MAX_DECODED_PAYLOAD_BYTES = int(os.getenv("VAULTQ_MAX_DECODED_PAYLOAD_BYTES", "8388608"))  # 8 MiB
-MAX_DECODED_SIGNATURE_BYTES = int(os.getenv("VAULTQ_MAX_DECODED_SIGNATURE_BYTES", "24576"))
+STORED_ENVELOPE_VERSION: Literal["v2"] = "v2"
+STORED_PAYLOAD_CIPHER_ALG: Literal["AES-256-GCM"] = "AES-256-GCM"
+STORED_KEY_WRAP_ALG: Literal["AES-256-GCM"] = "AES-256-GCM"
+MAX_B64_PAYLOAD_BYTES = parse_int_env("VAULTQ_MAX_B64_PAYLOAD_BYTES", 11184812)  # ~8 MiB decoded
+MAX_B64_SIGNATURE_BYTES = parse_int_env("VAULTQ_MAX_B64_SIGNATURE_BYTES", 32768)
+MAX_DECODED_PAYLOAD_BYTES = parse_int_env("VAULTQ_MAX_DECODED_PAYLOAD_BYTES", 8388608)  # 8 MiB
+MAX_DECODED_SIGNATURE_BYTES = parse_int_env("VAULTQ_MAX_DECODED_SIGNATURE_BYTES", 24576)
 
 
 def _safe_path_component(value: str) -> str:
@@ -272,6 +293,17 @@ def receive_record(envelope: SecureEnvelope):
     payload_ciphertext_b64 = base64.b64encode(payload_ciphertext).decode()
     encrypted_dek_nonce_b64 = base64.b64encode(encrypted_dek_nonce).decode()
     encrypted_dek_b64 = base64.b64encode(encrypted_dek).decode()
+    record_envelope: ServerVaultEnvelope = {
+        "envelope_version": STORED_ENVELOPE_VERSION,
+        "payload_cipher_alg": STORED_PAYLOAD_CIPHER_ALG,
+        "key_wrap_alg": STORED_KEY_WRAP_ALG,
+        "payload_nonce_b64": payload_nonce_b64,
+        "payload_ciphertext_b64": payload_ciphertext_b64,
+        "encrypted_dek_nonce_b64": encrypted_dek_nonce_b64,
+        "encrypted_dek_b64": encrypted_dek_b64,
+        "encrypted_dek_hash": stored_encrypted_dek_hash,
+        "aad_hash": aad_hash,
+    }
 
     record_hash = sha256_hex(
         build_server_record_hash_message(
@@ -279,16 +311,8 @@ def receive_record(envelope: SecureEnvelope):
             timestamp=stored_timestamp,
             doctor_id=doctor_id,
             patient_id=str(patient_id),
-            envelope_version=STORED_ENVELOPE_VERSION,
-            payload_cipher_alg=STORED_PAYLOAD_CIPHER_ALG,
-            key_wrap_alg=STORED_KEY_WRAP_ALG,
-            payload_nonce_b64=payload_nonce_b64,
-            payload_ciphertext_b64=payload_ciphertext_b64,
             payload_hash=stored_payload_hash,
-            encrypted_dek_nonce_b64=encrypted_dek_nonce_b64,
-            encrypted_dek_b64=encrypted_dek_b64,
-            encrypted_dek_hash=stored_encrypted_dek_hash,
-            aad_hash=aad_hash,
+            envelope=record_envelope,
         )
     )
 
@@ -357,7 +381,10 @@ def receive_record(envelope: SecureEnvelope):
 
 
 @router.post("/auth/change-password")
-def server_change_password(doctor_id: str, old_pass: str, new_pass: str):
+def server_change_password(payload: PasswordChangeRequest):
+    doctor_id = payload.doctor_id
+    old_pass = payload.old_pass
+    new_pass = payload.new_pass
     audit.info("Password change requested from doctor app for doctor_id=%s", doctor_id)
     if doctor_id not in db.doctors:
         audit.warning("Password change rejected: doctor not found doctor_id=%s", doctor_id)
@@ -371,9 +398,6 @@ def server_change_password(doctor_id: str, old_pass: str, new_pass: str):
     if old_pass == new_pass:
         audit.warning("Password change rejected: new password matches old for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=400, detail="New password must be different from old password")
-    if len(new_pass) < 10:
-        audit.warning("Password change rejected: weak new password length doctor_id=%s", doctor_id)
-        raise HTTPException(status_code=400, detail="New password must be at least 10 characters")
     
     # Securely verify the old password using bcrypt
     if not verify_password(old_pass, db.doctors[doctor_id].get("password", "")):

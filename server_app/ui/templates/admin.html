@@ -128,6 +128,9 @@
                 doctors: [],
                 newDocName: '',        
                 lastProvisioned: null, 
+                csrfToken: sessionStorage.getItem('vaultq_admin_csrf') || '',
+                refreshRetries: 0,
+                maxRefreshRetries: 1,
 
                 async init() {
                     await this.ensureAdminSession();
@@ -135,7 +138,13 @@
                 },
 
                 async ensureAdminSession() {
-                    const check = await fetch('/api/admin/stats', { credentials: 'same-origin' });
+                    let check;
+                    try {
+                        check = await fetch('/api/admin/stats', { credentials: 'same-origin' });
+                    } catch (e) {
+                        alert("Network error checking admin session.");
+                        throw e;
+                    }
                     if (check.ok) return;
 
                     const tokenInput = prompt("Enter admin token:");
@@ -144,20 +153,33 @@
                         throw new Error("Admin token missing");
                     }
 
-                    const sessionResp = await fetch('/api/auth/admin/session', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ token: tokenInput.trim() })
-                    });
+                    let sessionResp;
+                    try {
+                        sessionResp = await fetch('/api/auth/admin/session', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: tokenInput.trim() })
+                        });
+                    } catch (e) {
+                        alert("Network error creating admin session.");
+                        throw e;
+                    }
                     if (!sessionResp.ok) {
                         alert("Invalid admin token.");
                         throw new Error("Admin session creation failed");
                     }
+                    const sessionBody = await sessionResp.json().catch(() => ({}));
+                    this.csrfToken = sessionBody.csrf_token || '';
+                    sessionStorage.setItem('vaultq_admin_csrf', this.csrfToken);
                 },
 
                 authHeaders(extra = {}) {
-                    return { ...extra };
+                    const headers = { ...extra };
+                    if (this.csrfToken) {
+                        headers['X-CSRF-Token'] = this.csrfToken;
+                    }
+                    return headers;
                 },
 
                 async refresh() {
@@ -167,9 +189,15 @@
                             fetch('/api/admin/doctors', { headers: this.authHeaders(), credentials: 'same-origin' }),
                         ]);
                         if (statsRes.status === 401 || docsRes.status === 401) {
+                            if (this.refreshRetries >= this.maxRefreshRetries) {
+                                alert("Unable to refresh admin session. Please sign in again.");
+                                throw new Error("Admin session retry limit reached");
+                            }
+                            this.refreshRetries += 1;
                             await this.ensureAdminSession();
                             return this.refresh();
                         }
+                        this.refreshRetries = 0;
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
                     } catch (e) {

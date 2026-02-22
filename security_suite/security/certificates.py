@@ -1,5 +1,6 @@
 # security_suite/security/certificates.py
 import datetime
+from cryptography.exceptions import InvalidSignature
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ObjectIdentifier
 from cryptography.hazmat.primitives import hashes, serialization
@@ -20,12 +21,13 @@ class CertificateAuthority:
             raise ValueError("Invalid CSR signature.")
 
         doctor_pqc_public_bytes = extract_pqc_public_key_from_csr(doctor_csr)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
 
         builder = x509.CertificateBuilder()
         builder = builder.subject_name(doctor_csr.subject)
         builder = builder.issuer_name(issuer_cert.subject)
-        builder = builder.not_valid_before(datetime.datetime.utcnow())
-        builder = builder.not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
+        builder = builder.not_valid_before(now_utc)
+        builder = builder.not_valid_after(now_utc + datetime.timedelta(days=365))
         builder = builder.serial_number(x509.random_serial_number())
         builder = builder.public_key(doctor_csr.public_key())
         builder = builder.add_extension(
@@ -52,6 +54,11 @@ def generate_doctor_csr_pem(
         ]
     )
 
+    sign_algorithm = None if isinstance(
+        doctor_tls_private_key,
+        (ed25519.Ed25519PrivateKey, ed448.Ed448PrivateKey),
+    ) else hashes.SHA256()
+
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(subject)
@@ -59,7 +66,7 @@ def generate_doctor_csr_pem(
             x509.UnrecognizedExtension(OID_ML_DSA_65, doctor_pqc_public_bytes),
             critical=True,
         )
-        .sign(doctor_tls_private_key, hashes.SHA256())
+        .sign(doctor_tls_private_key, sign_algorithm)
     )
     return csr.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
@@ -85,19 +92,28 @@ def extract_pqc_public_key_from_csr(csr: x509.CertificateSigningRequest) -> byte
 def verify_csr_signature(csr: x509.CertificateSigningRequest) -> bool:
     public_key = csr.public_key()
     if isinstance(public_key, ec.EllipticCurvePublicKey):
-        public_key.verify(csr.signature, csr.tbs_certrequest_bytes, ec.ECDSA(csr.signature_hash_algorithm))
-        return True
+        try:
+            public_key.verify(csr.signature, csr.tbs_certrequest_bytes, ec.ECDSA(csr.signature_hash_algorithm))
+            return True
+        except InvalidSignature:
+            return False
     if isinstance(public_key, rsa.RSAPublicKey):
-        public_key.verify(
-            csr.signature,
-            csr.tbs_certrequest_bytes,
-            padding.PKCS1v15(),
-            csr.signature_hash_algorithm,
-        )
-        return True
+        try:
+            public_key.verify(
+                csr.signature,
+                csr.tbs_certrequest_bytes,
+                padding.PKCS1v15(),
+                csr.signature_hash_algorithm,
+            )
+            return True
+        except InvalidSignature:
+            return False
     if isinstance(public_key, ed25519.Ed25519PublicKey) or isinstance(public_key, ed448.Ed448PublicKey):
-        public_key.verify(csr.signature, csr.tbs_certrequest_bytes)
-        return True
+        try:
+            public_key.verify(csr.signature, csr.tbs_certrequest_bytes)
+            return True
+        except InvalidSignature:
+            return False
     return False
 
 

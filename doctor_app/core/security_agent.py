@@ -14,6 +14,8 @@ from .config import config
 from .models import UploadForm
 from .audit_logger import get_audit_logger
 
+UPLOAD_TIMEOUT_SECONDS = float(os.getenv("VAULTQ_UPLOAD_TIMEOUT_SECONDS", "30"))
+
 
 def _print_crypto_data(label: str, data: bytes):
     full_dump = os.getenv("VAULTQ_DEBUG_FULL_DUMPS", "0") == "1"
@@ -201,6 +203,7 @@ class SecurityAgent:
             resp = requests.post(
                 f"{config.server_url}/api/doctor/upload", 
                 json=envelope.model_dump(),
+                timeout=UPLOAD_TIMEOUT_SECONDS,
                 **self._tls_request_kwargs(),
             )
             resp.raise_for_status()
@@ -211,6 +214,9 @@ class SecurityAgent:
         except requests.exceptions.SSLError as e:
             self.log("Upload Rejected: TLS Authentication Failed (Invalid Cert/MITM).", "ERROR")
             self.audit.warning("TLS upload rejected doctor_id=%s: %s", self.doctor_id, str(e))
+        except requests.exceptions.Timeout as e:
+            self.log("Upload Failed: Server timed out during upload.", "ERROR")
+            self.audit.warning("Upload timeout doctor_id=%s: %s", self.doctor_id, str(e))
         except requests.exceptions.HTTPError as e:
              error_detail = e.response.json().get('detail', str(e))
              self.log(f"Upload Rejected: {error_detail}", "ERROR")

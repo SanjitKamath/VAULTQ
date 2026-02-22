@@ -18,13 +18,6 @@ def _load_env_file() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 _load_env_file()
 _ROOT = Path(__file__).resolve().parents[2]
 _KEYS_DIR = _ROOT / "doctor_app" / "storage" / "keys"

@@ -24,7 +24,34 @@ From repo root (VAULTQ_Backup):
   pip install -r doctor_app\requirements_doctor.txt
 
 
-3) ENVIRONMENT SETUP (IMPORTANT)
+3) GENERATING SELF-SIGNED TLS CERTIFICATES
+------------------------------------------------------------
+Local HTTPS requires `server.crt` and `server.key` so VAULTQ_SERVER_URL can stay on
+`https://127.0.0.1:8080`, and admin login via VAULTQ_ADMIN_TOKEN happens over TLS.
+
+From repo root (PowerShell / Git Bash with openssl available):
+
+    & C:\Program Files\Git\usr\bin\openssl.exe" version
+
+    & "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes `
+  >>   -keyout server_app/storage/certs/server.key `
+  >>   -out server_app/storage/certs/server.crt `
+  >>   -subj "/C=IN/O=VaultQ/OU=Dev/CN=127.0.0.1" `
+  >>   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+Optional helper script (`gen-certs.sh`):
+
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p server_app/storage/certs
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+    -keyout server_app/storage/certs/server.key \
+    -out server_app/storage/certs/server.crt \
+    -subj "/C=IN/O=VaultQ/OU=Dev/CN=127.0.0.1" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+
+4) ENVIRONMENT SETUP (IMPORTANT)
 ------------------------------------------------------------
 Create .env from .env.sample and set values:
 
@@ -49,7 +76,7 @@ SECURITY NOTE:
 - Keep only .env.sample in version control.
 
 
-4) RUN THE SYSTEM
+5) RUN THE SYSTEM
 ------------------------------------------------------------
 Open two terminals.
 Both must have:
@@ -68,7 +95,7 @@ Admin UI:
   https://127.0.0.1:8080/admin
 
 
-5) FIRST-TIME ONBOARDING FLOW
+6) FIRST-TIME ONBOARDING FLOW
 ------------------------------------------------------------
 1. In Admin UI:
    - Provision doctor (name)
@@ -88,7 +115,7 @@ Admin UI:
    - Secure upload is now enabled
 
 
-6) TLS ARTIFACT EXPECTATIONS
+7) TLS ARTIFACT EXPECTATIONS
 ------------------------------------------------------------
 Server secure mode requires:
 
@@ -104,9 +131,10 @@ Doctor app expects:
 
 If these are missing:
   - Provision TLS assets correctly; HTTP fallback is not supported.
+  - See Section 3, "Generating self-signed TLS certificates."
 
 
-7) WHERE IMPORTANT DATA IS STORED
+8) WHERE IMPORTANT DATA IS STORED
 ------------------------------------------------------------
 - Doctor / cert registry:
     hospital_vault.json
@@ -121,7 +149,7 @@ If these are missing:
     doctor_app/storage/
 
 
-8) DEVELOPMENT WORKFLOW FOR IMPROVEMENTS
+9) DEVELOPMENT WORKFLOW FOR IMPROVEMENTS
 ------------------------------------------------------------
 General workflow:
 
