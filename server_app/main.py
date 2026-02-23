@@ -79,6 +79,7 @@ def start_secure_server():
             "server_app/storage/certs."
         )
 
+    print("Starting VAULTQ Server, access admin dashboard at https://localhost:8080/admin")
     uvicorn.run(
         app,
         host="0.0.0.0",
@@ -88,6 +89,8 @@ def start_secure_server():
         ssl_ca_certs=root_ca,
         ssl_cert_reqs=ssl.CERT_REQUIRED if REQUIRE_MTLS else ssl.CERT_NONE,
     )
+
+    
 
 if __name__ == "__main__":
     start_secure_server()
