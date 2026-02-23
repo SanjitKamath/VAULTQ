@@ -5,10 +5,10 @@ import requests
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QInputDialog, QGraphicsDropShadowEffect
+    QPushButton, QMessageBox, QInputDialog, QGraphicsDropShadowEffect, QFrame
 )
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QPoint, Property, QRectF
-from PySide6.QtGui import QFont, QCursor, QColor, QPainter, QPen, QIcon
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QPoint, Property, QRectF, QSettings
+from PySide6.QtGui import QFont, QCursor, QColor, QPainter, QPen
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
@@ -23,6 +23,77 @@ from doctor_app.core.audit_logger import get_audit_logger
 AUTH_REQUEST_TIMEOUT_SECONDS = 10
 ONBOARD_REQUEST_TIMEOUT_SECONDS = 10
 CERT_POLL_TIMEOUT_SECONDS = 10
+
+
+class CustomTitleBar(QFrame):
+    """A custom, VS Code-style frameless title bar."""
+    def __init__(self, parent, title_text, is_fixed=False):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.is_fixed = is_fixed
+        self.setFixedHeight(34)
+        self.setObjectName("CustomTitleBar")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.title_label = QLabel(title_text)
+        self.title_label.setObjectName("TitleBarText")
+        layout.addWidget(self.title_label)
+        
+        layout.addStretch()
+        
+        self.min_btn = QPushButton("─")
+        self.min_btn.setObjectName("TitleBtn")
+        self.min_btn.clicked.connect(self.parent_window.showMinimized)
+        layout.addWidget(self.min_btn)
+        
+        if not is_fixed:
+            self.max_btn = QPushButton("□")
+            self.max_btn.setObjectName("TitleBtn")
+            self.max_btn.clicked.connect(self.toggle_maximize)
+            layout.addWidget(self.max_btn)
+        
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setObjectName("TitleCloseBtn")
+        self.close_btn.clicked.connect(self.parent_window.close)
+        layout.addWidget(self.close_btn)
+        
+        self._start_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        if not self.is_fixed and event.button() == Qt.LeftButton:
+            self.toggle_maximize()
+
+    def toggle_maximize(self):
+        if self.parent_window.isMaximized():
+            self.parent_window.showNormal()
+            self.max_btn.setText("□")
+            self.parent_window.main_layout.setContentsMargins(12, 12, 12, 12)
+        else:
+            self.parent_window.main_layout.setContentsMargins(0, 0, 0, 0)
+            self.parent_window.showMaximized()
+            self.max_btn.setText("❐")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._start_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._start_pos is not None:
+            if self.parent_window.isMaximized():
+                self.parent_window.showNormal()
+                self.max_btn.setText("□")
+                self.parent_window.main_layout.setContentsMargins(12, 12, 12, 12)
+                self._start_pos = event.globalPosition().toPoint()
+            
+            delta = event.globalPosition().toPoint() - self._start_pos
+            self.parent_window.move(self.parent_window.pos() + delta)
+            self._start_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._start_pos = None
 
 
 class AnimatedTick(QWidget):
@@ -48,17 +119,14 @@ class AnimatedTick(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Modern vibrant green matching the verified button state
-        pen = QPen(QColor("#22C55E"), 4.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        pen = QPen(QColor("#34C759"), 4.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         painter.setPen(pen)
 
         rect = QRectF(5, 5, 50, 50)
         
-        # 1. Animate outer circle (0.0 to 0.5 progress)
         circle_prog = min(self._progress * 2, 1.0)
         painter.drawArc(rect, 90 * 16, int(-360 * 16 * circle_prog))
 
-        # 2. Animate the tick (0.5 to 1.0 progress)
         if self._progress > 0.5:
             tick_prog = (self._progress - 0.5) * 2
             
@@ -88,24 +156,21 @@ class LoginWindow(QMainWindow):
             raise RuntimeError("Insecure server URL blocked. Configure VAULTQ_SERVER_URL with https://")
 
         self.vault = LocalKeyVault()
-
-        self.setWindowTitle("Login - VaultQ Doctor Portal")
-
-        self.setWindowIcon(QIcon("doctor_app/assets/icon.png"))
         
-        # Enforce fixed size and completely disable the OS maximize button
-        self.setFixedSize(440, 520)
-        self.setWindowFlags(Qt.Window | Qt.MSWindowsFixedSizeDialogHint)
+        # Read the global settings preference to match Main Window
+        self.settings = QSettings("VaultQ", "DoctorApp")
+        self.is_dark_mode = self.settings.value("theme/is_dark_mode", False, type=bool)
+
+        self.setWindowTitle("VaultQ – Authentication")
+        self.setFixedSize(460, 540) # Slightly larger to account for custom shadow margins
         
         self.setWindowOpacity(0.0)
 
         self._center_window()
         self._build_ui()
-        self._apply_neutral_theme()
+        self._apply_theme(self.is_dark_mode)
         
         QTimer.singleShot(50, self._animate_entrance)
-
-    # ---- Setup & Helpers ----
 
     def _request_verify_arg(self):
         if not os.path.exists(config.ca_cert_path):
@@ -146,15 +211,39 @@ class LoginWindow(QMainWindow):
             screen.center().y() - self.height() // 2
         )
 
-    # ---- UI Definitions ----
-
     def _build_ui(self):
+        # Frameless outer setup
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
         root = QWidget(self)
         self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-        layout.setAlignment(Qt.AlignCenter)
+        self.main_layout = QVBoxLayout(root)
+        self.main_layout.setContentsMargins(12, 12, 12, 12) # Margin to render shadow
+        
+        # Inner Background Container (Acts as the real window)
+        self.bg_container = QWidget()
+        self.bg_container.setObjectName("BgContainer")
+        bg_layout = QVBoxLayout(self.bg_container)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(0)
+        
+        # Window Drop Shadow
+        window_shadow = QGraphicsDropShadowEffect(self)
+        window_shadow.setBlurRadius(25)
+        window_shadow.setColor(QColor(0, 0, 0, 50))
+        window_shadow.setOffset(0, 8)
+        self.bg_container.setGraphicsEffect(window_shadow)
 
-        # Main Card
+        # Custom VS Code-style Title Bar
+        self.title_bar = CustomTitleBar(self, "VaultQ – Authentication", is_fixed=True)
+        bg_layout.addWidget(self.title_bar)
+        
+        # Content Layout
+        content_layout = QVBoxLayout()
+        content_layout.setAlignment(Qt.AlignCenter)
+
+        # Main Central Card
         self.card = QWidget()
         self.card.setObjectName("Card")
         self.card.setFixedSize(360, 440)
@@ -162,18 +251,17 @@ class LoginWindow(QMainWindow):
         card_layout.setContentsMargins(32, 40, 32, 32)
         card_layout.setSpacing(0)
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 15))
-        shadow.setOffset(0, 10)
-        self.card.setGraphicsEffect(shadow)
+        card_shadow = QGraphicsDropShadowEffect(self)
+        card_shadow.setBlurRadius(30)
+        card_shadow.setColor(QColor(0, 0, 0, 15))
+        card_shadow.setOffset(0, 10)
+        self.card.setGraphicsEffect(card_shadow)
 
-        # Header
         title = QLabel("VaultQ")
         title.setObjectName("AppTitle")
         title.setAlignment(Qt.AlignCenter)
         
-        subtitle = QLabel("Doctor Portal Login")
+        subtitle = QLabel("Secure Workspace")
         subtitle.setObjectName("Subtitle")
         subtitle.setAlignment(Qt.AlignCenter)
 
@@ -181,7 +269,6 @@ class LoginWindow(QMainWindow):
         card_layout.addWidget(subtitle)
         card_layout.addSpacing(32)
 
-        # Form Layout (0 Spacing for pixel-perfect manual control)
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(0)
@@ -199,7 +286,6 @@ class LoginWindow(QMainWindow):
 
         form_layout.addSpacing(8)
 
-        # Forgot Password aligned strictly to the right
         self.forgot_btn = QPushButton("Forgot password?")
         self.forgot_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.forgot_btn.setObjectName("ForgotBtn")
@@ -208,7 +294,6 @@ class LoginWindow(QMainWindow):
 
         form_layout.addSpacing(20)
         
-        # Primary Sign In Button
         self.login_btn = QPushButton("Sign in")
         self.login_btn.setObjectName("PrimaryBtn")
         self.login_btn.setMinimumHeight(44)
@@ -220,7 +305,6 @@ class LoginWindow(QMainWindow):
 
         form_layout.addSpacing(8)
 
-        # Fixed height message container to prevent layout jumping
         self.msg_container = QWidget()
         self.msg_container.setFixedHeight(30)
         msg_layout = QVBoxLayout(self.msg_container)
@@ -240,83 +324,176 @@ class LoginWindow(QMainWindow):
         
         form_layout.addWidget(self.msg_container)
 
-        # Animated Tick Widget fixed at the bottom
         self.tick_widget = AnimatedTick()
         form_layout.addWidget(self.tick_widget, alignment=Qt.AlignCenter)
 
         form_layout.addStretch()
         card_layout.addLayout(form_layout)
-        layout.addWidget(self.card)
+        content_layout.addWidget(self.card)
+        bg_layout.addLayout(content_layout)
+        
+        self.main_layout.addWidget(self.bg_container)
 
-    def _apply_neutral_theme(self):
+    def _apply_theme(self, dark_mode: bool):
         font_family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
-        self.setStyleSheet(f"""
-            QMainWindow {{ background: #F4F4F5; }}
-            QWidget#Card {{ 
-                background: #FFFFFF; 
-                border: 1px solid #E4E4E7;
-                border-radius: 16px; 
-            }}
-            QLabel#AppTitle {{
-                color: #111827;
-                font-family: {font_family};
-                font-size: 28px;
-                font-weight: 800;
-                letter-spacing: -0.5px;
-            }}
-            QLabel#Subtitle {{ color: #6B7280; font-size: 13px; margin-top: -4px; font-family: {font_family}; }}
-            
-            QLineEdit {{ 
-                min-height: 42px;
-                padding: 0 14px; 
-                background: #FFFFFF; 
-                color: #111827; 
-                border: 1px solid #D1D5DB; 
-                border-radius: 8px; 
-                font-size: 14px;
-                font-family: {font_family};
-            }}
-            QLineEdit:focus {{ border: 1.5px solid #60A5FA; }}
-            
-            /* Modern Light Blue Default State */
-            QPushButton#PrimaryBtn {{ 
-                background-color: #60A5FA; 
-                color: #FFFFFF; 
-                border: none; 
-                border-radius: 8px; 
-                font-size: 15px;
-                font-weight: 600;
-                font-family: {font_family};
-            }}
-            QPushButton#PrimaryBtn:hover {{ background-color: #3B82F6; }}
-            QPushButton#PrimaryBtn:disabled {{ background-color: #93C5FD; color: #FFFFFF; }}
-            
-            /* Error State (Red) */
-            QPushButton#PrimaryBtn[state="error"] {{ 
-                background-color: #EF4444;
-            }}
-            
-            /* Success State (Green) */
-            QPushButton#PrimaryBtn[state="success"] {{ 
-                background-color: #22C55E;
-            }}
-            
-            QPushButton#ForgotBtn {{ 
-                color: #6B7280; 
-                background: transparent; 
-                border: none; 
-                font-size: 13px;
-                padding: 0;
-                margin: 0;
-                font-family: {font_family};
-            }}
-            QPushButton#ForgotBtn:hover {{ color: #111827; }}
-            
-            QLabel#StatusLabel {{ color: #6B7280; font-size: 12px; font-family: {font_family}; }}
-            QLabel#ErrorLabel {{ color: #EF4444; font-size: 13px; font-family: {font_family}; }}
-        """)
+        
+        if dark_mode:
+            self.setStyleSheet(f"""
+                QMainWindow {{ background: transparent; }}
+                
+                /* Main App Container */
+                QWidget#BgContainer {{ 
+                    background-color: #1C1C1E; 
+                    border: 1px solid #38383A; 
+                    border-radius: 12px; 
+                }}
+                
+                /* Custom Title Bar */
+                QFrame#CustomTitleBar {{ 
+                    background-color: #242426; 
+                    border-top-left-radius: 12px; 
+                    border-top-right-radius: 12px; 
+                }}
+                QLabel#TitleBarText {{ color: #F2F2F7; font-family: {font_family}; font-size: 13px; font-weight: 500; }}
+                QPushButton#TitleBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 14px; width: 46px; height: 34px; }}
+                QPushButton#TitleBtn:hover {{ background-color: #3A3A3C; color: #FFFFFF; }}
+                QPushButton#TitleCloseBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 14px; width: 46px; height: 34px; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn:hover {{ background-color: #FF453A; color: #FFFFFF; }}
+                
+                /* Login Card */
+                QWidget#Card {{ 
+                    background: #2C2C2E; 
+                    border: 1px solid #38383A;
+                    border-radius: 16px; 
+                }}
+                QLabel#AppTitle {{ color: #FFFFFF; font-family: {font_family}; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }}
+                QLabel#Subtitle {{ color: #A1A1AA; font-size: 13px; margin-top: -4px; font-family: {font_family}; }}
+                
+                /* Fixed Font Colors for Dark Mode */
+                QLineEdit {{ 
+                    min-height: 42px;
+                    padding: 0 14px; 
+                    background: #1C1C1E; 
+                    color: #FFFFFF; 
+                    border: 1px solid #48484A; 
+                    border-radius: 8px; 
+                    font-size: 14px;
+                    font-family: {font_family};
+                }}
+                QLineEdit:focus {{ border: 1.5px solid #0A84FF; background: #242426; }}
+                
+                QPushButton#PrimaryBtn {{ 
+                    background-color: #0A84FF; 
+                    color: #FFFFFF; 
+                    border: none; 
+                    border-radius: 8px; 
+                    font-size: 15px;
+                    font-weight: 600;
+                    font-family: {font_family};
+                }}
+                QPushButton#PrimaryBtn:hover {{ background-color: #007AFF; }}
+                QPushButton#PrimaryBtn:disabled {{ background-color: #3A3A3C; color: #636366; }}
+                QPushButton#PrimaryBtn[state="error"], QPushButton#PrimaryBtn[state="error"]:disabled {{ 
+                    background-color: #FF453A; 
+                    color: #FFFFFF; 
+                }}
+                QPushButton#PrimaryBtn[state="success"], QPushButton#PrimaryBtn[state="success"]:disabled {{ 
+                    background-color: #32D74B; 
+                    color: #FFFFFF; 
+                }}
+                
+                QPushButton#ForgotBtn {{ 
+                    color: #A1A1AA; 
+                    background: transparent; 
+                    border: none; 
+                    font-size: 13px;
+                    padding: 0;
+                    margin: 0;
+                    font-family: {font_family};
+                }}
+                QPushButton#ForgotBtn:hover {{ color: #FFFFFF; text-decoration: underline; }}
+                
+                QLabel#StatusLabel {{ color: #A1A1AA; font-size: 12px; font-family: {font_family}; }}
+                QLabel#ErrorLabel {{ color: #FF453A; font-size: 13px; font-family: {font_family}; }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QMainWindow {{ background: transparent; }}
+                
+                /* Main App Container */
+                QWidget#BgContainer {{ 
+                    background-color: #F5F5F7; 
+                    border: 1px solid #D1D1D6; 
+                    border-radius: 12px; 
+                }}
+                
+                /* Custom Title Bar */
+                QFrame#CustomTitleBar {{ 
+                    background-color: #E5E5EA; 
+                    border-top-left-radius: 12px; 
+                    border-top-right-radius: 12px; 
+                }}
+                QLabel#TitleBarText {{ color: #000000; font-family: {font_family}; font-size: 13px; font-weight: 500; }}
+                QPushButton#TitleBtn {{ color: #6B7280; border: none; background: transparent; font-size: 14px; width: 46px; height: 34px; }}
+                QPushButton#TitleBtn:hover {{ background-color: #D1D1D6; color: #1D1D1F; }}
+                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 14px; width: 46px; height: 34px; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn:hover {{ background-color: #FF3B30; color: #FFFFFF; }}
 
-    # ---- Window Events & Animations ----
+                /* Login Card */
+                QWidget#Card {{ 
+                    background: #FFFFFF; 
+                    border: 1px solid #E4E4E7;
+                    border-radius: 16px; 
+                }}
+                QLabel#AppTitle {{ color: #111827; font-family: {font_family}; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }}
+                QLabel#Subtitle {{ color: #6B7280; font-size: 13px; margin-top: -4px; font-family: {font_family}; }}
+                
+                QLineEdit {{ 
+                    min-height: 42px;
+                    padding: 0 14px; 
+                    background: #FFFFFF; 
+                    color: #111827; 
+                    border: 1px solid #D1D5DB; 
+                    border-radius: 8px; 
+                    font-size: 14px;
+                    font-family: {font_family};
+                }}
+                QLineEdit:focus {{ border: 1.5px solid #007AFF; }}
+                
+                QPushButton#PrimaryBtn {{ 
+                    background-color: #007AFF; 
+                    color: #FFFFFF; 
+                    border: none; 
+                    border-radius: 8px; 
+                    font-size: 15px;
+                    font-weight: 600;
+                    font-family: {font_family};
+                }}
+                QPushButton#PrimaryBtn:hover {{ background-color: #0056B3; }}
+                QPushButton#PrimaryBtn:disabled {{ background-color: #E5E5EA; color: #8E8E93; }}
+                QPushButton#PrimaryBtn[state="error"], QPushButton#PrimaryBtn[state="error"]:disabled {{ 
+                    background-color: #FF3B30; 
+                    color: #FFFFFF; 
+                }}
+                QPushButton#PrimaryBtn[state="success"], QPushButton#PrimaryBtn[state="success"]:disabled {{ 
+                    background-color: #34C759; 
+                    color: #FFFFFF; 
+                }}
+                
+                QPushButton#ForgotBtn {{ 
+                    color: #FFFFFF; 
+                    background: transparent; 
+                    border: none; 
+                    font-size: 13px;
+                    padding: 0;
+                    margin: 0;
+                    font-family: {font_family};
+                }}
+                QPushButton#ForgotBtn:hover {{ color: #111827; text-decoration: underline; }}
+                
+                QLabel#StatusLabel {{ color: #6B7280; font-size: 12px; font-family: {font_family}; }}
+                QLabel#ErrorLabel {{ color: #FF3B30; font-size: 13px; font-family: {font_family}; }}
+            """)
 
     def _animate_entrance(self):
         self.move_anim = QPropertyAnimation(self, b"pos")
@@ -359,14 +536,12 @@ class LoginWindow(QMainWindow):
         self.status_label.setText("")
         self.error_label.setText("")
         
-        # Turn button green instantly; size remains completely static
         self.login_btn.setText("Verified")
         self.login_btn.setProperty("state", "success")
         self.login_btn.style().unpolish(self.login_btn)
         self.login_btn.style().polish(self.login_btn)
         self.login_btn.setCursor(QCursor(Qt.ArrowCursor))
 
-        # Start the clean drawing animation of the modern tick below the button
         self.tick_anim = QPropertyAnimation(self.tick_widget, b"progress")
         self.tick_anim.setDuration(550)
         self.tick_anim.setStartValue(0.0)
@@ -396,7 +571,6 @@ class LoginWindow(QMainWindow):
     def _launch_main_app(self, doc_id, private_key):
         self.hide()
         self._main_app = VaultQDoctorApp(doctor_id=doc_id, private_key=private_key, server_url=self.server_url)
-        
         self._main_app.setWindowOpacity(0.0)
         self._main_app.show()
         
@@ -409,8 +583,6 @@ class LoginWindow(QMainWindow):
     def closeEvent(self, event):
         self.hide()
         sys.exit(0)
-
-    # ---- Logic Methods ----
 
     def _on_forgot_password(self):
         self.audit.info("Forgot password triggered on login screen")
@@ -455,12 +627,11 @@ class LoginWindow(QMainWindow):
             
             self.audit.info("Login verify accepted for doctor_id=%s", doc_id)
 
-            # Local Vault Validation
             try:
                 private_key = self.vault.load_identity(doc_id, password)
             except ValueError:
                 private_key = None
-                self.audit.info("Local vault password mismatch for doctor_id=%s; migration or recovery required", doc_id)
+                self.audit.info("Local vault password mismatch for doctor_id=%s", doc_id)
 
                 choice = QMessageBox.question(
                     self,
@@ -473,7 +644,6 @@ class LoginWindow(QMainWindow):
                 )
 
                 if choice == QMessageBox.Cancel:
-                    self.audit.warning("Local vault migration/recovery cancelled for doctor_id=%s", doc_id)
                     raise Exception("Local vault recovery cancelled.")
 
                 if choice == QMessageBox.Yes:
@@ -481,28 +651,22 @@ class LoginWindow(QMainWindow):
                         self, "Migrate Local Vault", "Enter previous local vault password to migrate:", QLineEdit.Password
                     )
                     if not ok or not old_local_password:
-                        self.audit.warning("Local vault migration cancelled for doctor_id=%s", doc_id)
                         raise Exception("Local vault migration cancelled.")
 
                     self.vault.change_password(doc_id, old_local_password, password)
                     private_key = self.vault.load_identity(doc_id, password)
                     
                     if not private_key:
-                        self.audit.error("Local vault migration failed for doctor_id=%s", doc_id)
                         raise Exception("Local vault migration failed.")
-                    self.audit.info("Local vault migration succeeded for doctor_id=%s", doc_id)
                 else:
                     self.vault.delete_identity(doc_id)
                     self._clear_local_tls_assets()
-                    self.audit.warning("Local vault reset for doctor_id=%s; key re-enrollment will start", doc_id)
 
-            # Authorized bypass
             if private_key:
                 self.audit.info("Login using existing local ML-DSA identity for doctor_id=%s", doc_id)
                 self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, private_key))
                 return
 
-            # Onboarding process
             self.status_label.setText("Generating Quantum-Secure Identities...")
             QApplication.processEvents()
 

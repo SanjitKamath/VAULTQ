@@ -1,3 +1,4 @@
+# doctor_app/ui/main_window.py
 import os
 import json
 import time
@@ -8,10 +9,11 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QFileDialog, QTabWidget,
     QPlainTextEdit, QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
-    QFrame, QProgressBar, QListWidget, QListWidgetItem, QGraphicsOpacityEffect
+    QFrame, QProgressBar, QListWidget, QListWidgetItem, QGraphicsOpacityEffect, QSizeGrip
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QSettings
-from PySide6.QtGui import QFont, QCursor, QIcon
+from PySide6.QtGui import QFont, QCursor, QColor
+from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
 from doctor_app.core.config import config
 from doctor_app.core.models import UploadForm
@@ -19,8 +21,79 @@ from doctor_app.core.security_agent import SecurityAgent
 from doctor_app.core.keystore import LocalKeyVault
 
 
+class CustomTitleBar(QFrame):
+    """A custom, VS Code-style frameless title bar."""
+    def __init__(self, parent, title_text, is_fixed=False):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.is_fixed = is_fixed
+        self.setFixedHeight(34)
+        self.setObjectName("CustomTitleBar")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.title_label = QLabel(title_text)
+        self.title_label.setObjectName("TitleBarText")
+        layout.addWidget(self.title_label)
+        
+        layout.addStretch()
+        
+        # Using native Windows Segoe Fluent Icons for pixel-perfect title buttons
+        self.min_btn = QPushButton("\uE921")
+        self.min_btn.setObjectName("TitleBtn")
+        self.min_btn.clicked.connect(self.parent_window.showMinimized)
+        layout.addWidget(self.min_btn)
+        
+        if not is_fixed:
+            self.max_btn = QPushButton("\uE922")
+            self.max_btn.setObjectName("TitleBtn")
+            self.max_btn.clicked.connect(self.toggle_maximize)
+            layout.addWidget(self.max_btn)
+        
+        self.close_btn = QPushButton("\uE8BB")
+        self.close_btn.setObjectName("TitleCloseBtn")
+        self.close_btn.clicked.connect(self.parent_window.close)
+        layout.addWidget(self.close_btn)
+        
+        self._start_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        if not self.is_fixed and event.button() == Qt.LeftButton:
+            self.toggle_maximize()
+
+    def toggle_maximize(self):
+        if self.parent_window.isMaximized():
+            self.parent_window.showNormal()
+            self.max_btn.setText("\uE922")
+            self.parent_window.main_layout.setContentsMargins(12, 12, 12, 12)
+        else:
+            self.parent_window.main_layout.setContentsMargins(0, 0, 0, 0)
+            self.parent_window.showMaximized()
+            self.max_btn.setText("\uE923")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._start_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._start_pos is not None:
+            if self.parent_window.isMaximized():
+                self.parent_window.showNormal()
+                self.max_btn.setText("\uE922")
+                self.parent_window.main_layout.setContentsMargins(12, 12, 12, 12)
+                self._start_pos = event.globalPosition().toPoint()
+            
+            delta = event.globalPosition().toPoint() - self._start_pos
+            self.parent_window.move(self.parent_window.pos() + delta)
+            self._start_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._start_pos = None
+
+
 class FileDropZone(QFrame):
-    """Custom widget for Drag and Drop file selection with click-to-browse fallback."""
     file_dropped = Signal(str)
     clicked = Signal()
 
@@ -127,7 +200,6 @@ class VaultQDoctorApp(QMainWindow):
         self.selected_file_path = None
         self._closing = False
         
-        # Initialize Settings & Load Theme Preference
         self.settings = QSettings("VaultQ", "DoctorApp")
         self.is_dark_mode = self.settings.value("theme/is_dark_mode", False, type=bool)
 
@@ -141,12 +213,13 @@ class VaultQDoctorApp(QMainWindow):
         self._ui_queue = queue.Queue()
 
         self.setWindowTitle("VaultQ – Doctor Portal")
-
-        self.setWindowIcon(QIcon("doctor_app/assets/icon.ico"))
-
-        self.resize(1050, 700)
+        
+        self.setMinimumSize(920, 620)
+        self.resize(1070, 720)
+        
         self._center_window()
         self._build_ui()
+        
         self._apply_theme(self.is_dark_mode)
 
         self.append_log = self._thread_safe_log
@@ -168,23 +241,40 @@ class VaultQDoctorApp(QMainWindow):
             screen.center().y() - self.height() // 2
         )
 
-    # ---- UI Definitions ----
-
     def _build_ui(self):
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
         root = QWidget(self)
         self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        self.main_layout = QVBoxLayout(root)
+        self.main_layout.setContentsMargins(12, 12, 12, 12)
+        
+        # Inner Background Container (Acts as the real window)
+        self.bg_container = QWidget()
+        self.bg_container.setObjectName("BgContainer")
+        bg_layout = QVBoxLayout(self.bg_container)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(0)
+        
+        window_shadow = QGraphicsDropShadowEffect(self)
+        window_shadow.setBlurRadius(25)
+        window_shadow.setColor(QColor(0, 0, 0, 50))
+        window_shadow.setOffset(0, 8)
+        self.bg_container.setGraphicsEffect(window_shadow)
 
-        # Top Bar
+        # Custom VS Code-style Title Bar
+        self.title_bar = CustomTitleBar(self, "VaultQ – Doctor Portal", is_fixed=False)
+        bg_layout.addWidget(self.title_bar)
+
+        # Original Top Bar
         top_bar = QWidget()
         top_bar.setObjectName("TopBar")
         top_bar.setFixedHeight(65)
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(24, 0, 24, 0)
 
-        self.title_label = QLabel("VaultQ Doctor Portal")
+        self.title_label = QLabel("VaultQ Workspace")
         self.title_label.setObjectName("AppTitle")
 
         self.status_label = QLabel("● Disconnected")
@@ -195,7 +285,6 @@ class VaultQDoctorApp(QMainWindow):
         top_layout.addStretch()
         top_layout.addWidget(self.status_label)
 
-        # Main Workspace content area
         workspace = QWidget()
         workspace.setObjectName("Workspace")
         ws_layout = QVBoxLayout(workspace)
@@ -217,15 +306,26 @@ class VaultQDoctorApp(QMainWindow):
         self._build_settings_tab()
 
         ws_layout.addWidget(self.tabs)
-        layout.addWidget(top_bar)
-        layout.addWidget(workspace)
+        
+        bg_layout.addWidget(top_bar)
+        bg_layout.addWidget(workspace)
+        
+        # Add a size grip to the bottom right for manual window resizing
+        grip_layout = QHBoxLayout()
+        grip_layout.setContentsMargins(0, 0, 0, 0)
+        grip_layout.addStretch()
+        grip = QSizeGrip(self.bg_container)
+        grip.setFixedSize(16, 16)
+        grip_layout.addWidget(grip, 0, Qt.AlignBottom | Qt.AlignRight)
+        
+        bg_layout.addLayout(grip_layout)
+        self.main_layout.addWidget(self.bg_container)
 
     def _build_upload_tab(self):
         layout = QHBoxLayout(self.upload_tab)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(24)
 
-        # Left Column: Upload Form
         left_col = QWidget()
         left_layout = QVBoxLayout(left_col)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -260,6 +360,7 @@ class VaultQDoctorApp(QMainWindow):
         left_layout.addWidget(self.progress_bar)
 
         self.upload_btn = QPushButton("Encrypt & Secure Upload")
+        self.upload_btn.setObjectName("PrimaryButton")
         self.upload_btn.setMinimumHeight(42)
         self.upload_btn.setEnabled(False)
         self.upload_btn.clicked.connect(self.action_upload)
@@ -267,7 +368,6 @@ class VaultQDoctorApp(QMainWindow):
         
         left_layout.addStretch()
 
-        # Right Column: History List (Cards)
         right_col = QWidget()
         right_col.setMinimumWidth(300)
         right_col.setMaximumWidth(400)
@@ -307,7 +407,6 @@ class VaultQDoctorApp(QMainWindow):
         layout.addWidget(header)
         layout.addSpacing(24)
 
-        # Appearance Controls
         app_header = QLabel("Appearance")
         app_header.setObjectName("SectionHeader")
         layout.addWidget(app_header)
@@ -321,14 +420,12 @@ class VaultQDoctorApp(QMainWindow):
         
         layout.addSpacing(32)
 
-        # Network Controls
         net_header = QLabel("Network Connection")
         net_header.setObjectName("SectionHeader")
         layout.addWidget(net_header)
 
         net_controls = QHBoxLayout()
         
-        # Connect button gets a specific object name to style it green/red dynamically
         self.connect_btn = QPushButton("Redo Handshake")
         self.connect_btn.setObjectName("ConnectBtn")
         self.connect_btn.setProperty("status", "offline")
@@ -348,7 +445,6 @@ class VaultQDoctorApp(QMainWindow):
 
         layout.addSpacing(32)
 
-        # Security Controls
         sec_header = QLabel("Account Security")
         sec_header.setObjectName("SectionHeader")
         layout.addWidget(sec_header)
@@ -367,13 +463,10 @@ class VaultQDoctorApp(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         self.theme_btn.setText("Light Mode" if self.is_dark_mode else "Dark Mode")
         
-        # Save setting globally
         self.settings.setValue("theme/is_dark_mode", self.is_dark_mode)
-
-        # Grab current state for crossfade
+        
         pixmap = self.grab()
 
-        # Create an overlay
         self.overlay = QLabel(self)
         self.overlay.setPixmap(pixmap)
         self.overlay.resize(self.size())
@@ -381,20 +474,17 @@ class VaultQDoctorApp(QMainWindow):
         self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents) 
         self.overlay.show()
 
-        # Apply the new theme underneath instantly
         self._apply_theme(self.is_dark_mode)
 
-        # Animate the overlay fading out
         self.effect = QGraphicsOpacityEffect(self.overlay)
         self.overlay.setGraphicsEffect(self.effect)
         
         self.anim = QPropertyAnimation(self.effect, b"opacity")
-        self.anim.setDuration(450) # Smooth 450ms fade
+        self.anim.setDuration(450)
         self.anim.setStartValue(1.0)
         self.anim.setEndValue(0.0)
         self.anim.setEasingCurve(QEasingCurve.InOutQuad)
         
-        # Cleanup when done
         self.anim.finished.connect(self.overlay.deleteLater)
         self.anim.start()
 
@@ -403,7 +493,25 @@ class VaultQDoctorApp(QMainWindow):
         
         if dark_mode:
             self.setStyleSheet(f"""
-                QMainWindow {{ background-color: #1C1C1E; color: #EBEBF5; }}
+                QMainWindow {{ background: transparent; }}
+                
+                QWidget#BgContainer {{ 
+                    background-color: #1C1C1E; 
+                    border: 1px solid #38383A; 
+                    border-radius: 12px; 
+                }}
+                
+                QFrame#CustomTitleBar {{ 
+                    background-color: #242426; 
+                    border-top-left-radius: 12px; 
+                    border-top-right-radius: 12px; 
+                }}
+                QLabel#TitleBarText {{ color: #EBEBF5; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
+                QPushButton#TitleBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; }}
+                QPushButton#TitleBtn:hover {{ background-color: #3A3A3C; color: #FFFFFF; }}
+                QPushButton#TitleCloseBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn:hover {{ background-color: #FF453A; color: #FFFFFF; }}
+
                 QWidget#TopBar {{ background-color: #242426; border-bottom: 1px solid #38383A; }}
                 QWidget#Workspace {{ background-color: #1C1C1E; }}
                 
@@ -416,9 +524,8 @@ class VaultQDoctorApp(QMainWindow):
                 QLabel#DropIcon {{ color: #8E8E93; }}
                 QLabel#DropText {{ color: #8E8E93; font-size: 14px; }}
                 
-                /* Muted connection labels */
-                QLabel#StatusLabelOffline {{ color: #D9534F; }}
-                QLabel#StatusLabelOnline {{ color: #5CB85C; }}
+                QLabel#StatusLabelOffline {{ color: #FF453A; }}
+                QLabel#StatusLabelOnline {{ color: #32D74B; }}
                 
                 QTabWidget::pane {{ 
                     border: 1px solid #38383A; 
@@ -441,7 +548,7 @@ class VaultQDoctorApp(QMainWindow):
                 QTabBar::tab:selected {{ 
                     background: #2C2C2E; 
                     color: #FFFFFF; 
-                    border-top: 2px solid #557A8A; /* Soft slate accent */
+                    border-top: 2px solid #0A84FF;
                 }}
                 QTabBar::tab:hover:!selected {{ background: #242426; }}
 
@@ -454,7 +561,7 @@ class VaultQDoctorApp(QMainWindow):
                     font-size: 14px;
                     font-family: {font_family};
                 }}
-                QLineEdit:focus {{ border: 1px solid #557A8A; background: #242426; }}
+                QLineEdit:focus {{ border: 1px solid #0A84FF; background: #242426; }}
 
                 QFrame#DropZone {{ 
                     border: 2px dashed #48484A; 
@@ -462,38 +569,52 @@ class VaultQDoctorApp(QMainWindow):
                     background: #242426; 
                 }}
                 QFrame#DropZone:hover, QFrame#DropZone[dragHover="true"] {{ 
-                    border-color: #557A8A; 
-                    background: #2A363B; /* Subtle slate tint */
+                    border-color: #636366; 
+                    background: #2C2C2E; 
                 }}
 
-                /* All standard buttons use a soft, muted slate/teal tone */
                 QPushButton {{ 
                     padding: 8px 16px; 
-                    background-color: #374F59; 
+                    background: #3A3A3C; 
                     color: #EBEBF5; 
-                    border: 1px solid #456370; 
+                    border: 1px solid #48484A; 
                     border-radius: 6px; 
                     font-weight: 500; 
                     font-family: {font_family};
                 }}
-                QPushButton:hover {{ background-color: #456370; border-color: #557A8A; }}
-                QPushButton:pressed {{ background-color: #2D424A; }}
-                QPushButton:disabled {{ background-color: #2C2C2E; color: #636366; border-color: #38383A; }}
+                QPushButton:hover {{ background: #48484A; border-color: #636366; }}
+                
+                QPushButton#PrimaryButton {{ 
+                    background: #0A84FF;
+                    color: white; 
+                    border: none; 
+                }}
+                QPushButton#PrimaryButton:hover {{ background: #007AFF; }}
+                QPushButton#PrimaryButton:disabled {{ background: #3A3A3C; color: #636366; }}
+                
+                /* Override text color to white for disabled success/error states */
+                QPushButton#PrimaryButton[state="error"], QPushButton#PrimaryButton[state="error"]:disabled {{ 
+                    background-color: #FF453A; 
+                    color: #FFFFFF; 
+                }}
+                QPushButton#PrimaryButton[state="success"], QPushButton#PrimaryButton[state="success"]:disabled {{ 
+                    background-color: #32D74B; 
+                    color: #FFFFFF; 
+                }}
 
-                /* Connection status dynamic button styling */
                 QPushButton#ConnectBtn[status="online"] {{ 
-                    background-color: #2E503B; /* Muted graphite green */
-                    border-color: #3A664A; 
+                    background-color: #244C31; 
+                    border-color: #356B46; 
                     color: #EBEBF5; 
                 }}
-                QPushButton#ConnectBtn[status="online"]:hover {{ background-color: #3A664A; }}
+                QPushButton#ConnectBtn[status="online"]:hover {{ background-color: #356B46; }}
                 
                 QPushButton#ConnectBtn[status="offline"] {{ 
-                    background-color: #5C3232; /* Muted warm red */
-                    border-color: #7A4242; 
+                    background-color: #5C2525; 
+                    border-color: #823434; 
                     color: #EBEBF5; 
                 }}
-                QPushButton#ConnectBtn[status="offline"]:hover {{ background-color: #7A4242; }}
+                QPushButton#ConnectBtn[status="offline"]:hover {{ background-color: #823434; }}
 
                 QProgressBar {{ 
                     border: none; 
@@ -501,7 +622,7 @@ class VaultQDoctorApp(QMainWindow):
                     border-radius: 4px; 
                 }}
                 QProgressBar::chunk {{ 
-                    background-color: #557A8A; /* Soft slate accent */
+                    background-color: #0A84FF;
                     border-radius: 4px; 
                 }}
 
@@ -520,8 +641,8 @@ class VaultQDoctorApp(QMainWindow):
                     font-family: {font_family};
                 }}
                 QListWidget#HistoryList::item:selected, QListWidget#HistoryList::item:hover {{ 
-                    background: #2A363B; 
-                    border-color: #456370; 
+                    background: #2C2C2E; 
+                    border-color: #48484A; 
                 }}
 
                 QPlainTextEdit#LogBox {{ 
@@ -536,7 +657,25 @@ class VaultQDoctorApp(QMainWindow):
             """)
         else:
             self.setStyleSheet(f"""
-                QMainWindow {{ background-color: #F5F5F7; color: #1D1D1F; }}
+                QMainWindow {{ background: transparent; }}
+                
+                QWidget#BgContainer {{ 
+                    background-color: #F5F5F7; 
+                    border: 1px solid #D1D1D6; 
+                    border-radius: 12px; 
+                }}
+                
+                QFrame#CustomTitleBar {{ 
+                    background-color: #E5E5EA; 
+                    border-top-left-radius: 12px; 
+                    border-top-right-radius: 12px; 
+                }}
+                QLabel#TitleBarText {{ color: #111827; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
+                QPushButton#TitleBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; }}
+                QPushButton#TitleBtn:hover {{ background-color: #D1D1D6; color: #1D1D1F; }}
+                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn:hover {{ background-color: #FF3B30; color: #FFFFFF; }}
+
                 QWidget#TopBar {{ background-color: #FFFFFF; border-bottom: 1px solid #E5E5EA; }}
                 QWidget#Workspace {{ background-color: #F5F5F7; }}
                 
@@ -549,8 +688,8 @@ class VaultQDoctorApp(QMainWindow):
                 QLabel#DropIcon {{ color: #8E8E93; }}
                 QLabel#DropText {{ color: #8E8E93; font-size: 14px; }}
                 
-                QLabel#StatusLabelOffline {{ color: #D9534F; }}
-                QLabel#StatusLabelOnline {{ color: #5CB85C; }}
+                QLabel#StatusLabelOffline {{ color: #FF3B30; }}
+                QLabel#StatusLabelOnline {{ color: #34C759; }}
                 
                 QTabWidget::pane {{ 
                     border: 1px solid #E5E5EA; 
@@ -573,7 +712,7 @@ class VaultQDoctorApp(QMainWindow):
                 QTabBar::tab:selected {{ 
                     background: #FFFFFF; 
                     color: #1D1D1F; 
-                    border-top: 2px solid #A9BCC4; /* Soft slate accent */
+                    border-top: 2px solid #007AFF;
                 }}
                 QTabBar::tab:hover:!selected {{ background: #E5E5EA; }}
 
@@ -586,7 +725,7 @@ class VaultQDoctorApp(QMainWindow):
                     font-size: 14px;
                     font-family: {font_family};
                 }}
-                QLineEdit:focus {{ border: 1px solid #A9BCC4; }}
+                QLineEdit:focus {{ border: 1px solid #007AFF; }}
 
                 QFrame#DropZone {{ 
                     border: 2px dashed #C7C7CC; 
@@ -594,36 +733,50 @@ class VaultQDoctorApp(QMainWindow):
                     background: #F2F2F7; 
                 }}
                 QFrame#DropZone:hover, QFrame#DropZone[dragHover="true"] {{ 
-                    border-color: #A9BCC4; 
-                    background: #E8EEF0; /* Subtle slate tint */
+                    border-color: #8E8E93; 
+                    background: #E5E5EA; 
                 }}
 
-                /* All standard buttons use a softly tinted accent surface */
                 QPushButton {{ 
                     padding: 8px 16px; 
-                    background-color: #D3DCE0; 
+                    background: #FFFFFF; 
                     color: #1D1D1F; 
-                    border: 1px solid #C4D0D6; 
+                    border: 1px solid #D1D1D6; 
                     border-radius: 6px; 
                     font-weight: 500; 
                     font-family: {font_family};
                 }}
-                QPushButton:hover {{ background-color: #C4D0D6; border-color: #A9BCC4; }}
-                QPushButton:pressed {{ background-color: #B5C4CB; }}
-                QPushButton:disabled {{ background-color: #E5E5EA; color: #8E8E93; border-color: #D1D1D6; }}
+                QPushButton:hover {{ background: #F2F2F7; border-color: #C7C7CC; }}
                 
-                /* Connection status dynamic button styling */
-                QPushButton#ConnectBtn[status="online"] {{ 
-                    background-color: #CDE3D5; /* Soft tinted green */
-                    border-color: #B2CDBE; 
+                QPushButton#PrimaryButton {{ 
+                    background: #007AFF;
+                    color: white; 
+                    border: none; 
                 }}
-                QPushButton#ConnectBtn[status="online"]:hover {{ background-color: #B2CDBE; }}
+                QPushButton#PrimaryButton:hover {{ background: #0056B3; }}
+                QPushButton#PrimaryButton:disabled {{ background: #E5E5EA; color: #8E8E93; }}
+                
+                /* FORCED WHITE TEXT FOR SUCCESS/ERROR EVEN WHEN DISABLED */
+                QPushButton#PrimaryButton[state="error"], QPushButton#PrimaryButton[state="error"]:disabled {{ 
+                    background-color: #FF3B30; 
+                    color: #FFFFFF; 
+                }}
+                QPushButton#PrimaryButton[state="success"], QPushButton#PrimaryButton[state="success"]:disabled {{ 
+                    background-color: #34C759; 
+                    color: #FFFFFF; 
+                }}
+
+                QPushButton#ConnectBtn[status="online"] {{ 
+                    background-color: #E8F5E9; 
+                    border-color: #C8E6C9; 
+                }}
+                QPushButton#ConnectBtn[status="online"]:hover {{ background-color: #C8E6C9; }}
                 
                 QPushButton#ConnectBtn[status="offline"] {{ 
-                    background-color: #F0D4D4; /* Soft tinted red */
-                    border-color: #E0BCBC; 
+                    background-color: #FFEBEE; 
+                    border-color: #FFCDD2; 
                 }}
-                QPushButton#ConnectBtn[status="offline"]:hover {{ background-color: #E0BCBC; }}
+                QPushButton#ConnectBtn[status="offline"]:hover {{ background-color: #FFCDD2; }}
 
                 QProgressBar {{ 
                     border: none; 
@@ -631,7 +784,7 @@ class VaultQDoctorApp(QMainWindow):
                     border-radius: 4px; 
                 }}
                 QProgressBar::chunk {{ 
-                    background-color: #A9BCC4; /* Soft slate accent */
+                    background-color: #007AFF;
                     border-radius: 4px; 
                 }}
 
@@ -650,8 +803,8 @@ class VaultQDoctorApp(QMainWindow):
                     font-family: {font_family};
                 }}
                 QListWidget#HistoryList::item:selected, QListWidget#HistoryList::item:hover {{ 
-                    background: #E8EEF0; 
-                    border-color: #C4D0D6; 
+                    background: #F2F2F7; 
+                    border-color: #C7C7CC; 
                 }}
 
                 QPlainTextEdit#LogBox {{ 
@@ -664,8 +817,6 @@ class VaultQDoctorApp(QMainWindow):
                     font-size: 13px;
                 }}
             """)
-
-    # ---- Logic Methods ----
 
     def action_connect(self):
         self.connect_btn.setEnabled(False)
@@ -682,7 +833,6 @@ class VaultQDoctorApp(QMainWindow):
             self.status_label.setObjectName("StatusLabelOffline")
             self.connect_btn.setProperty("status", "offline")
             
-        # Re-polish to apply dynamic object name colors
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
         
@@ -720,7 +870,7 @@ class VaultQDoctorApp(QMainWindow):
             self.upload_btn.setEnabled(False)
             self.upload_btn.setText("Encrypting & Uploading...")
             self.progress_bar.show()
-            self.progress_bar.setRange(0, 0) # Indeterminate spinner
+            self.progress_bar.setRange(0, 0)
             QApplication.processEvents()
 
             self.agent.process_and_upload(form)
@@ -728,7 +878,6 @@ class VaultQDoctorApp(QMainWindow):
             self.progress_bar.setRange(0, 1)
             self.progress_bar.setValue(1) 
             
-            # History card setup
             item = QListWidgetItem(f"✅ {patient_id}\n📄 {filename}")
             self.history_list.insertItem(0, item)
 
@@ -744,7 +893,6 @@ class VaultQDoctorApp(QMainWindow):
             self.upload_btn.setText("Encrypt & Secure Upload")
             self.progress_bar.hide()
             
-            # Add an error history card
             item = QListWidgetItem(f"❌ {patient_id} (Failed)\n📄 {filename}")
             self.history_list.insertItem(0, item)
             
