@@ -48,14 +48,33 @@ def build_server_record_hash_message(
     *,
     master_kid: str,
     timestamp: int,
-    doctor_id: str,
     patient_id: str,
     payload_hash: str,
-    envelope: ServerVaultEnvelope,
+    doctor_id: str = "unknown_doctor",
+    envelope: ServerVaultEnvelope | None = None,
+    payload: str | None = None,
 ) -> bytes:
     """
     Deterministic context for integrity hash of stored server vault records.
+    Supports both:
+    - v2 envelope mode (preferred): pass `envelope`
+    - legacy mode: pass `payload`
     """
+    if envelope is None:
+        if payload is None:
+            raise ValueError("Provide either 'envelope' (v2) or 'payload' (legacy v1')")
+        # Legacy record hash format used by existing stored records/routes.
+        return _canonical_bytes(
+            {
+                "kind": "server-vault-record-v1",
+                "master_kid": master_kid,
+                "timestamp": timestamp,
+                "patient_id": patient_id,
+                "payload": payload,
+                "payload_hash": payload_hash,
+            }
+        )
+
     return _canonical_bytes(
         {
             "kind": "server-vault-record-v2",

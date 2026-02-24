@@ -575,7 +575,7 @@ class ModernMessageBox(QDialog):
             """)
     
 class VaultQDoctorApp(QMainWindow):
-    def __init__(self, doctor_id: str, private_key: bytes, server_url: str = None):
+    def __init__(self, doctor_id: str, private_key: bytes, server_url: str = None, enroll_token: str = ""):
         super().__init__()
         self.doctor_id = doctor_id
         self.vault = LocalKeyVault()
@@ -591,6 +591,7 @@ class VaultQDoctorApp(QMainWindow):
         if clean_url and not clean_url.lower().startswith("https://"):
             raise ValueError("Insecure server URL blocked. VaultQ doctor client requires HTTPS.")
         self.server_url = clean_url
+        self.enroll_token = (enroll_token or "").strip()
         if self.server_url:
             config.server_url = clean_url
 
@@ -613,7 +614,8 @@ class VaultQDoctorApp(QMainWindow):
             log_callback=self.append_log,
             status_callback=lambda connected: self._ui_queue.put(("status", connected)),
             loaded_private_key=private_key,
-            doctor_id=doctor_id
+            doctor_id=doctor_id,
+            enroll_token=self.enroll_token,
         )
 
         QTimer.singleShot(50, self._process_ui_queue)

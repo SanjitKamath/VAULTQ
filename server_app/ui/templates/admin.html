@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf" content="{{CSRF_TOKEN}}">
     <title>VaultQ | System Administration</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/alpinejs" defer></script>
+    <link rel="stylesheet" href="/admin/static/admin.tailwind.css" integrity="sha384-VINUIuRueYPCfmQYB23tL8t+S7KEg8ti6p7XkGStuVsdPfUhvYthgoqzwVSrgnbq" crossorigin="anonymous">
+    <script src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js" integrity="sha384-9Ax3MmS9AClxJyd5/zafcXXjxmwFhZCdsT6HJoJjarvCaAkJlk5QDzjLJm+Wdx5F" crossorigin="anonymous" defer></script>
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans antialiased">
 
@@ -201,7 +202,9 @@
                 stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, total_patients: 0, ca_algorithm: '...' },
                 doctors: [],
                 patients: [],
-                adminToken: localStorage.getItem('vaultq_admin_token') || '',
+                csrfToken: (document.querySelector('meta[name="csrf"]')?.getAttribute('content') || '').trim(),
+                refreshRetries: 0,
+                maxRefreshRetries: 2,
                 newDocName: '',
                 lastProvisioned: null,
                 newPatientName: '',
@@ -215,12 +218,17 @@
                 async ensureAdminSession() {
                     let check;
                     try {
-                        check = await fetch('/api/admin/stats', { credentials: 'same-origin' });
+                        check = await fetch('/api/admin/stats', {
+                            credentials: 'same-origin',
+                            headers: this.authHeaders(),
+                        });
                     } catch (e) {
                         alert("Network error checking admin session.");
                         throw e;
                     }
-                    if (check.ok) return;
+                    if (check.ok) {
+                        return;
+                    }
 
                     const tokenInput = prompt("Enter admin token:");
                     if (!tokenInput || !tokenInput.trim()) {
@@ -245,9 +253,9 @@
                         throw new Error("Admin session creation failed");
                     }
                     const sessionBody = await sessionResp.json().catch(() => ({}));
-                    this.csrfToken = sessionBody.csrf_token || '';
-                    sessionStorage.setItem('vaultq_admin_csrf', this.csrfToken);
-                },
+                    if (sessionBody.csrf_token) {
+                        this.csrfToken = sessionBody.csrf_token;
+                    }                },
 
                 authHeaders(extra = {}) {
                     const headers = { ...extra };

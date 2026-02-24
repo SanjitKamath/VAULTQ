@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from cryptography.x509.oid import NameOID
+from datetime import timezone
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -13,8 +14,6 @@ from security_suite.security.models import SecureEnvelope, StoredVaultEnvelope
 from security_suite.security.integrity import (
     sha256_hex,
     build_doctor_signature_message,
-    build_server_record_hash_message,
-    ServerVaultEnvelope,
 )
 from security_suite.crypto import DSAManager
 from security_suite.security.certificates import (
@@ -28,6 +27,7 @@ from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import verify_password, hash_password  # For secure bcrypt passwords
 from ..core.integrity_audit import append_integrity_event
+from ..core.ca_setup import load_hospital_ca_signer
 
 router = APIRouter(prefix="/api/doctor", tags=["Doctor Operations"])
 audit = get_audit_logger()
@@ -94,6 +94,21 @@ def _build_storage_aad(*, master_kid: str, doctor_id: str, patient_id: str, time
     ).encode("utf-8")
 
 
+def _build_legacy_record_hash_message(*, master_kid: str, timestamp: int, patient_id: str, payload: str, payload_hash: str) -> bytes:
+    return json.dumps(
+        {
+            "kind": "server-vault-record-v1",
+            "master_kid": master_kid,
+            "timestamp": timestamp,
+            "patient_id": patient_id,
+            "payload": payload,
+            "payload_hash": payload_hash,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 @router.post("/upload")
 def receive_record(envelope: SecureEnvelope):
     """
@@ -124,14 +139,16 @@ def receive_record(envelope: SecureEnvelope):
         raise HTTPException(status_code=403, detail="Forbidden: No certificate record found in CA Vault.")
         
     # C. Validate Expiration and Status
-    valid_cert = None
     current_time = time.time()
-    for cert in doctor_certs:
-        if cert.get('status') == 'active' and cert.get('expires_at', 0) > current_time:
-            valid_cert = cert
-            break
-            
-    if not valid_cert:
+    active_unexpired_certs = [
+        cert
+        for cert in doctor_certs
+        if cert.get("status") == "active" and float(cert.get("expires_at", 0) or 0) > current_time
+    ]
+    # Prefer most recently expiring cert first (latest rotation).
+    active_unexpired_certs.sort(key=lambda c: float(c.get("expires_at", 0) or 0), reverse=True)
+
+    if not active_unexpired_certs:
         audit.warning("Upload rejected: no active/unexpired cert for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=403, detail="Forbidden: Certificate is expired or revoked.")
 
@@ -151,35 +168,59 @@ def receive_record(envelope: SecureEnvelope):
         raise HTTPException(status_code=401, detail="Replay detected.")
 
     # --- 2. AUTHENTICATION (APPLICATION-LAYER SIGNATURE VERIFICATION) ---
-    cert_pem = valid_cert.get("pem_data")
-    if not cert_pem:
-        audit.warning("Upload rejected: missing certificate payload for doctor_id=%s cert_id=%s", doctor_id, valid_cert.get("id"))
-        raise HTTPException(status_code=403, detail="Forbidden: Missing certificate payload.")
+    cert_bound_doctor_pub = None
+    valid_cert = None
+    last_cert_error = "certificate validation failed"
+    for cert_candidate in active_unexpired_certs:
+        cert_pem = cert_candidate.get("pem_data")
+        if not cert_pem:
+            last_cert_error = "missing certificate payload"
+            continue
 
-    try:
-        cert_obj = load_pem_certificate(cert_pem)
-        if cert_obj.issuer != state.hospital_root_cert.subject:
-            raise HTTPException(status_code=403, detail="Certificate issuer mismatch.")
+        try:
+            cert_obj = load_pem_certificate(cert_pem)
+            not_before = getattr(cert_obj, "not_valid_before_utc", cert_obj.not_valid_before.replace(tzinfo=timezone.utc))
+            not_after = getattr(cert_obj, "not_valid_after_utc", cert_obj.not_valid_after.replace(tzinfo=timezone.utc))
+            if not_before.timestamp() > current_time or not_after.timestamp() < current_time:
+                raise ValueError("certificate validity window check failed")
 
-        if not verify_cert_chain(cert_obj, state.hospital_root_cert):
-            raise HTTPException(status_code=403, detail="Unsupported issuer public key type.")
-        if cert_obj.not_valid_before.timestamp() > current_time or cert_obj.not_valid_after.timestamp() < current_time:
-            raise HTTPException(status_code=403, detail="Certificate validity window check failed.")
+            subject_ids = cert_obj.subject.get_attributes_for_oid(NameOID.USER_ID)
+            if not subject_ids or subject_ids[0].value != doctor_id:
+                raise ValueError("certificate subject does not match doctor identity")
 
-        subject_ids = cert_obj.subject.get_attributes_for_oid(NameOID.USER_ID)
-        if not subject_ids or subject_ids[0].value != doctor_id:
-            raise HTTPException(status_code=403, detail="Certificate subject does not match doctor identity.")
+            chain_verified = False
+            chain_reason = "unknown"
+            try:
+                if cert_obj.issuer != state.hospital_root_cert.subject:
+                    chain_reason = "certificate issuer mismatch"
+                elif verify_cert_chain(cert_obj, state.hospital_root_cert):
+                    chain_verified = True
+                else:
+                    chain_reason = "unsupported issuer public key type"
+            except Exception as chain_exc:
+                chain_reason = f"{type(chain_exc).__name__}: {str(chain_exc) or 'signature validation failed'}"
 
-        cert_bound_doctor_pub = extract_pqc_public_key_from_cert(cert_obj)
-    except HTTPException as exc:
+            if not chain_verified:
+                raise ValueError(f"certificate chain verification failed: {chain_reason}")
+
+            cert_bound_doctor_pub = extract_pqc_public_key_from_cert(cert_obj)
+            valid_cert = cert_candidate
+            break
+        except Exception as exc:
+            last_cert_error = f"{type(exc).__name__}: {str(exc) or 'certificate validation failed'}"
+            audit.warning(
+                "Upload cert candidate rejected for doctor_id=%s cert_id=%s reason=%s",
+                doctor_id,
+                cert_candidate.get("id"),
+                last_cert_error,
+            )
+
+    if not valid_cert or cert_bound_doctor_pub is None:
         audit.warning(
-            "Upload rejected: certificate validation failed for doctor_id=%s detail=%s",
+            "Upload rejected: certificate chain/signature validation failed for doctor_id=%s reason=%s",
             doctor_id,
-            str(getattr(exc, "detail", "certificate validation error")),
+            last_cert_error,
         )
-        raise
-    except Exception:
-        audit.exception("Upload rejected: certificate chain/signature validation exception for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=403, detail="Certificate chain/signature validation failed.")
 
     try:
@@ -266,9 +307,14 @@ def receive_record(envelope: SecureEnvelope):
         audit.warning("Upload rejected: patient_id missing after payload parse for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=400, detail="patient_id missing from payload metadata.")
 
-    # Encrypt payload with a per-record DEK, then encrypt DEK with the server master key.
+    # Encrypt payload for at-rest storage with server master key (legacy stored envelope format).
     stored_timestamp = int(time.time())
-    record_hash_message = build_server_record_hash_message(
+    payload_nonce = os.urandom(12)
+    stored_payload_bytes = payload_nonce + AESGCM(state.master_key).encrypt(payload_nonce, payload_bytes, None)
+    stored_payload_b64 = base64.b64encode(stored_payload_bytes).decode()
+    stored_payload_hash = sha256_hex(stored_payload_bytes)
+
+    record_hash_message = _build_legacy_record_hash_message(
         master_kid=state.master_kid,
         timestamp=stored_timestamp,
         patient_id=str(patient_id),
@@ -277,28 +323,25 @@ def receive_record(envelope: SecureEnvelope):
     )
     record_hash = sha256_hex(record_hash_message)
 
-    # Hospital signs the record with its ML-DSA-65 CA key (rotation-safe: pub key embedded)
-    hospital_signature = state.hospital_ca.sign(record_hash_message)
+    # Hospital signs the record with its ML-DSA-65 CA key (rotation-safe: pub key embedded).
+    hospital_ca = load_hospital_ca_signer()
+    try:
+        hospital_signature = hospital_ca.sign(record_hash_message)
+        hospital_pub_b64 = base64.b64encode(hospital_ca.get_public_bytes()).decode()
+    finally:
+        hospital_ca.container_key = None
     audit.info("Hospital ML-DSA-65 signature applied to record for patient_id=%s", patient_id)
 
     stored_envelope = StoredVaultEnvelope(
         master_kid=state.master_kid,
         timestamp=stored_timestamp,
-        doctor_id=doctor_id,
+        doctor_id=str(doctor_id),
         patient_id=str(patient_id),
-        envelope_version=STORED_ENVELOPE_VERSION,
-        payload_cipher_alg=STORED_PAYLOAD_CIPHER_ALG,
-        key_wrap_alg=STORED_KEY_WRAP_ALG,
-        payload_nonce_b64=payload_nonce_b64,
-        payload_ciphertext_b64=payload_ciphertext_b64,
+        payload=stored_payload_b64,
         payload_hash=stored_payload_hash,
-        encrypted_dek_nonce_b64=encrypted_dek_nonce_b64,
-        encrypted_dek_b64=encrypted_dek_b64,
-        encrypted_dek_hash=stored_encrypted_dek_hash,
-        aad_hash=aad_hash,
         record_hash=record_hash,
         hospital_signature=base64.b64encode(hospital_signature).decode(),
-        hospital_pub=base64.b64encode(state.hospital_ca.get_public_bytes()).decode(),
+        hospital_pub=hospital_pub_b64,
         hospital_sig_alg="ML-DSA-65",
     )
 
@@ -327,8 +370,6 @@ def receive_record(envelope: SecureEnvelope):
             "payload_cipher_alg": STORED_PAYLOAD_CIPHER_ALG,
             "key_wrap_alg": STORED_KEY_WRAP_ALG,
             "stored_payload_hash": stored_payload_hash,
-            "stored_encrypted_dek_hash": stored_encrypted_dek_hash,
-            "aad_hash": aad_hash,
             "record_hash": record_hash,
             "cert_id": valid_cert.get("id"),
         }

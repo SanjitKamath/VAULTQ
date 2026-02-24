@@ -61,6 +61,20 @@ class DSAManager:
         self.sk = private_bytes
         self.pk = None
         self.container_key = None 
+        # Keep public key consistent with private key when loading persisted identities.
+        if self.sk:
+            try:
+                self.pk = ML_DSA_65.pk_from_sk(self.sk)
+            except Exception as e:
+                self.audit.error(
+                    "DSA init key-derivation failed from provided private key: "
+                    "exc_type=%s exc_msg=%s sk_present=%s",
+                    type(e).__name__,
+                    str(e),
+                    bool(self.sk),
+                )
+                self.audit.exception("DSA init key-derivation exception traceback")
+                self.pk = None
 
     def generate_keypair(self) -> Tuple[bytes, bytes]:
         """

@@ -29,15 +29,39 @@ def _print_crypto_data(label: str, data: bytes):
     )
 
 
+def _extract_http_error_detail(exc: requests.exceptions.HTTPError) -> str:
+    resp = exc.response
+    if resp is None:
+        return str(exc)
+    try:
+        payload = resp.json()
+        if isinstance(payload, dict):
+            return str(payload.get("detail") or payload.get("message") or str(exc))
+        return str(payload)
+    except ValueError:
+        text = (resp.text or "").strip()
+        if text:
+            return text
+        return f"{resp.status_code} {resp.reason or 'HTTP Error'}"
+
+
 class SecurityAgent:
     """Manages the PQC State and Network Operations asynchronously over mTLS."""
     
-    def __init__(self, log_callback, status_callback, loaded_private_key: bytes = None, doctor_id: str = None):
+    def __init__(
+        self,
+        log_callback,
+        status_callback,
+        loaded_private_key: bytes = None,
+        doctor_id: str = None,
+        enroll_token: str = "",
+    ):
         self.log = log_callback
         self.status = status_callback
         self.doctor_id = doctor_id
         self.audit = get_audit_logger()
         self.is_connected = False
+        self.enroll_token = (enroll_token or "").strip()
         
         keys_dir = Path(getattr(config, "keys_dir", "doctor_app/storage/keys"))
         keys_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -80,6 +104,42 @@ class SecurityAgent:
             "mTLS assets missing. Provide doctor certificate, private key, and trusted CA certificate."
         )
 
+    def _pre_enroll_verify_kwargs(self):
+        if not os.path.exists(self.ca_cert_path):
+            raise RuntimeError(f"CA certificate not found: {self.ca_cert_path}")
+        return {"verify": self.ca_cert_path}
+
+    def _refresh_cert_from_pre_enroll(self) -> bool:
+        """
+        Pull latest issued doctor certificate over TLS-only pre-enrollment endpoint.
+        Returns True if a cert was refreshed locally.
+        """
+        doctor_id = self.doctor_id or "unknown"
+        pre_enroll_url = str(getattr(config, "pre_enroll_url", "")).rstrip("/")
+        if not pre_enroll_url.lower().startswith("https://"):
+            return False
+
+        headers = {}
+        if self.enroll_token:
+            headers["X-Enroll-Token"] = self.enroll_token
+
+        resp = requests.get(
+            f"{pre_enroll_url}/api/pre-enroll/auth/my-cert/{doctor_id}",
+            headers=headers,
+            timeout=5,
+            **self._pre_enroll_verify_kwargs(),
+        )
+        if resp.status_code != 200:
+            return False
+        body = resp.json()
+        if body.get("status") != "issued" or not body.get("pem_data"):
+            return False
+
+        Path(self.cert_path).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with open(self.cert_path, "w", encoding="utf-8") as f:
+            f.write(body["pem_data"])
+        return True
+
     def _connection_task(self):
         try:
             self.log("Establishing mTLS connection to VaultQ Server...", "INFO")
@@ -101,8 +161,42 @@ class SecurityAgent:
             self.update_status(True)
                 
         except Exception as e:
-            self.log(f"mTLS Connection Failed: {str(e)}", "ERROR")
-            self.audit.exception("mTLS connection failed for doctor_id=%s: %s", self.doctor_id, str(e))
+            msg = str(e)
+            if "Remote end closed connection without response" in msg or "Connection aborted" in msg:
+                try:
+                    if self._refresh_cert_from_pre_enroll():
+                        self.log("Fetched latest issued certificate. Retrying mTLS handshake...", "INFO")
+                        self.audit.info("mTLS recovery: refreshed cert from pre-enroll for doctor_id=%s", self.doctor_id)
+                        resp = requests.get(
+                            f"{config.server_url}/api/auth/my-cert/{self.doctor_id or 'unknown'}",
+                            timeout=5,
+                            **self._tls_request_kwargs(),
+                        )
+                        resp.raise_for_status()
+                        self.is_connected = True
+                        self.log("Secure mTLS Session Established. Identity Verified.", "SUCCESS")
+                        self.audit.info("mTLS recovery succeeded for doctor_id=%s", self.doctor_id)
+                        self.update_status(True)
+                        return
+                except Exception as retry_exc:
+                    self.audit.warning("mTLS recovery retry failed for doctor_id=%s: %s", self.doctor_id, str(retry_exc))
+
+                admin_base = str(getattr(config, "admin_url", "") or getattr(config, "pre_enroll_url", "")).rstrip("/")
+                admin_url = admin_base if admin_base.lower().endswith("/admin") else f"{admin_base}/admin"
+                hint = (
+                    "mTLS handshake rejected by server (client cert likely invalid/revoked). "
+                    f"Refresh/issue cert via {admin_url} and sign in again."
+                )
+                self.log(f"mTLS Connection Failed: {hint}", "ERROR")
+                self.audit.exception(
+                    "mTLS connection failed for doctor_id=%s: %s (hint=%s)",
+                    self.doctor_id,
+                    msg,
+                    hint,
+                )
+            else:
+                self.log(f"mTLS Connection Failed: {msg}", "ERROR")
+                self.audit.exception("mTLS connection failed for doctor_id=%s: %s", self.doctor_id, msg)
             self.update_status(False)
 
     def prepare_patient_payload(self, patient_id: str, file_data: bytes) -> dict:
@@ -218,9 +312,14 @@ class SecurityAgent:
             self.log("Upload Failed: Server timed out during upload.", "ERROR")
             self.audit.warning("Upload timeout doctor_id=%s: %s", self.doctor_id, str(e))
         except requests.exceptions.HTTPError as e:
-             error_detail = e.response.json().get('detail', str(e))
-             self.log(f"Upload Rejected: {error_detail}", "ERROR")
-             self.audit.warning("Upload rejected doctor_id=%s detail=%s", self.doctor_id, error_detail)
+            error_detail = _extract_http_error_detail(e)
+            self.log(f"Upload Rejected: {error_detail}", "ERROR")
+            self.audit.warning(
+                "Upload rejected doctor_id=%s status=%s detail=%s",
+                self.doctor_id,
+                getattr(e.response, "status_code", "unknown"),
+                error_detail,
+            )
         except Exception as e:
             self.log(f"Upload Error: {str(e)}", "ERROR")
             self.audit.exception("Upload error doctor_id=%s: %s", self.doctor_id, str(e))

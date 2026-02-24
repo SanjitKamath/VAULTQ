@@ -152,8 +152,11 @@ class LoginWindow(QMainWindow):
         self.audit.info("Doctor login window initialized")
 
         self.server_url = str(config.server_url).rstrip("/")
+        self.pre_enroll_url = str(config.pre_enroll_url).rstrip("/")
         if not self.server_url.lower().startswith("https://"):
             raise RuntimeError("Insecure server URL blocked. Configure VAULTQ_SERVER_URL with https://")
+        if not self.pre_enroll_url.lower().startswith("https://"):
+            raise RuntimeError("Insecure pre-enroll URL blocked. Configure VAULTQ_PRE_ENROLL_URL with https://")
 
         self.vault = LocalKeyVault()
         
@@ -203,6 +206,29 @@ class LoginWindow(QMainWindow):
             raise RuntimeError("Insecure server URL blocked. VaultQ requires HTTPS.")
         self._copy_server_ca_if_available()
         return self._request_verify_arg()
+
+    def _sync_issued_certificate(self, doc_id: str, verify_arg: str, enroll_token: str) -> bool:
+        """
+        Pull latest issued cert from pre-enroll endpoint and persist locally.
+        Returns True when a valid cert is present locally after sync.
+        """
+        resp = requests.get(
+            f"{self.pre_enroll_url}/api/pre-enroll/auth/my-cert/{doc_id}",
+            headers={"X-Enroll-Token": enroll_token},
+            verify=verify_arg,
+            timeout=CERT_POLL_TIMEOUT_SECONDS,
+        )
+        if resp.status_code != 200:
+            return False
+
+        payload = resp.json()
+        if payload.get("status") != "issued" or not payload.get("pem_data"):
+            return False
+
+        keys_dir = self._keys_dir()
+        with open(os.path.join(keys_dir, "doctor_cert.pem"), "w", encoding="utf-8") as f:
+            f.write(payload["pem_data"])
+        return True
 
     def _center_window(self):
         screen = self.screen().availableGeometry()
@@ -551,7 +577,7 @@ class LoginWindow(QMainWindow):
         self.tick_anim.finished.connect(lambda: QTimer.singleShot(600, callback))
         self.tick_anim.start()
 
-    def _animate_exit_and_launch(self, doc_id, private_key):
+    def _animate_exit_and_launch(self, doc_id, private_key, enroll_token=""):
         self.exit_fade = QPropertyAnimation(self, b"windowOpacity")
         self.exit_fade.setDuration(400)
         self.exit_fade.setEndValue(0.0)
@@ -565,12 +591,17 @@ class LoginWindow(QMainWindow):
         self.exit_group.addAnimation(self.exit_fade)
         self.exit_group.addAnimation(self.exit_move)
         
-        self.exit_group.finished.connect(lambda: self._launch_main_app(doc_id, private_key))
+        self.exit_group.finished.connect(lambda: self._launch_main_app(doc_id, private_key, enroll_token))
         self.exit_group.start()
 
-    def _launch_main_app(self, doc_id, private_key):
+    def _launch_main_app(self, doc_id, private_key, enroll_token=""):
         self.hide()
-        self._main_app = VaultQDoctorApp(doctor_id=doc_id, private_key=private_key, server_url=self.server_url)
+        self._main_app = VaultQDoctorApp(
+            doctor_id=doc_id,
+            private_key=private_key,
+            server_url=self.server_url,
+            enroll_token=enroll_token,
+        )
         self._main_app.setWindowOpacity(0.0)
         self._main_app.show()
         
@@ -615,7 +646,7 @@ class LoginWindow(QMainWindow):
             verify_arg = self._prepare_tls_material()
 
             resp = requests.post(
-                f"{self.server_url}/api/auth/verify",
+                f"{self.pre_enroll_url}/api/pre-enroll/auth/verify",
                 json={"id": doc_id, "password": password},
                 verify=verify_arg,
                 timeout=AUTH_REQUEST_TIMEOUT_SECONDS,
@@ -624,7 +655,10 @@ class LoginWindow(QMainWindow):
             if resp.status_code != 200:
                 self.audit.warning("Login verify rejected for doctor_id=%s status=%s", doc_id, resp.status_code)
                 raise Exception("Invalid credentials")
-            
+            verify_body = resp.json()
+            enroll_token = (verify_body.get("enroll_token") or "").strip()
+            if not enroll_token:
+                raise Exception("Enrollment token missing from auth response.")
             self.audit.info("Login verify accepted for doctor_id=%s", doc_id)
 
             try:
@@ -664,7 +698,12 @@ class LoginWindow(QMainWindow):
 
             if private_key:
                 self.audit.info("Login using existing local ML-DSA identity for doctor_id=%s", doc_id)
-                self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, private_key))
+                if not self._sync_issued_certificate(doc_id, verify_arg, enroll_token):
+                    raise Exception(
+                        "No active certificate available for this doctor. "
+                        "Ask Admin to issue/refresh certificate, then sign in again."
+                    )
+                self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, private_key, enroll_token))
                 return
 
             self.status_label.setText("Generating Quantum-Secure Identities...")
@@ -677,14 +716,14 @@ class LoginWindow(QMainWindow):
             tls_private_key = ec.generate_private_key(ec.SECP256R1())
             csr_pem = generate_doctor_csr_pem(
                 doctor_id=doc_id,
-                doctor_name=resp.json().get("name", "Doctor"),
+                doctor_name=verify_body.get("name", "Doctor"),
                 doctor_pqc_public_bytes=pqc_pub,
                 doctor_tls_private_key=tls_private_key,
             )
-
             onboard = requests.post(
-                f"{self.server_url}/api/admin/doctors/onboard",
+                f"{self.pre_enroll_url}/api/pre-enroll/doctors/onboard",
                 json={"id": doc_id, "csr_pem": csr_pem},
+                headers={"X-Enroll-Token": enroll_token},
                 verify=verify_arg,
                 timeout=ONBOARD_REQUEST_TIMEOUT_SECONDS,
             )
@@ -705,7 +744,7 @@ class LoginWindow(QMainWindow):
 
             self.status_label.setText("Waiting for Administrator Approval...")
             self.login_btn.setText("Enrolling...")
-            self._poll_for_certificate(doc_id, pqc_priv)
+            self._poll_for_certificate(doc_id, pqc_priv, enroll_token)
 
         except requests.exceptions.Timeout:
             self._show_error_state("Request timed out. Please try again.")
@@ -714,11 +753,12 @@ class LoginWindow(QMainWindow):
         except Exception as e:
             self._show_error_state(f"Error: {str(e)}")
 
-    def _poll_for_certificate(self, doc_id, pqc_priv):
+    def _poll_for_certificate(self, doc_id, pqc_priv, enroll_token):
         try:
             verify_arg = self._prepare_tls_material()
             resp = requests.get(
-                f"{self.server_url}/api/auth/my-cert/{doc_id}",
+                f"{self.pre_enroll_url}/api/pre-enroll/auth/my-cert/{doc_id}",
+                headers={"X-Enroll-Token": enroll_token},
                 verify=verify_arg,
                 timeout=CERT_POLL_TIMEOUT_SECONDS,
             )
@@ -728,8 +768,8 @@ class LoginWindow(QMainWindow):
                 with open(os.path.join(keys_dir, "doctor_cert.pem"), "w") as f:
                     f.write(resp.json()["pem_data"])
                 
-                self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, pqc_priv))
+                self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, pqc_priv, enroll_token))
             else:
-                QTimer.singleShot(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv))
+                QTimer.singleShot(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv, enroll_token))
         except Exception:
-            QTimer.singleShot(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv))
+            QTimer.singleShot(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv, enroll_token))

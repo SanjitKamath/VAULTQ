@@ -3,6 +3,7 @@ import datetime
 from cryptography.exceptions import InvalidSignature
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ObjectIdentifier
+from cryptography.x509.oid import ExtendedKeyUsageOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa, padding, ed25519, ed448
 from security_suite.crypto.primitive_dsa import DSAManager
@@ -31,8 +32,30 @@ class CertificateAuthority:
         builder = builder.serial_number(x509.random_serial_number())
         builder = builder.public_key(doctor_csr.public_key())
         builder = builder.add_extension(
-            x509.UnrecognizedExtension(OID_ML_DSA_65, doctor_pqc_public_bytes),
+            x509.BasicConstraints(ca=False, path_length=None),
             critical=True,
+        )
+        builder = builder.add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        builder = builder.add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=False,
+        )
+        builder = builder.add_extension(
+            x509.UnrecognizedExtension(OID_ML_DSA_65, doctor_pqc_public_bytes),
+            critical=False,
         )
 
         return builder.sign(private_key=issuer_key.container_key, algorithm=hashes.SHA256())

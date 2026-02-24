@@ -13,7 +13,7 @@ from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import verify_password, hash_password
 from ..core.admin_auth import require_admin_token
-from security_suite.security.integrity import sha256_hex, build_server_record_hash_message
+from security_suite.security.integrity import sha256_hex
 from security_suite.crypto import DSAManager
 
 router = APIRouter(prefix="/api/patient", tags=["Patient Portal"])
@@ -53,6 +53,21 @@ def _require_patient_session(x_patient_token: str = Header(default="")) -> str:
 def _generate_temp_password(length: int = 14) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _build_legacy_record_hash_message(*, master_kid: str, timestamp: int, patient_id: str, payload: str, payload_hash: str) -> bytes:
+    return json.dumps(
+        {
+            "kind": "server-vault-record-v1",
+            "master_kid": master_kid,
+            "timestamp": timestamp,
+            "patient_id": patient_id,
+            "payload": payload,
+            "payload_hash": payload_hash,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 # ── Patient Admin (called from Admin Dashboard) ─────────────────────
@@ -195,7 +210,7 @@ def get_patient_record(record_id: str, x_patient_token: str = Header(default="")
         raise HTTPException(status_code=403, detail="Encryption key verification failed: master key ID mismatch.")
 
     # ── Step 2: Verify record_hash integrity ──
-    record_hash_message = build_server_record_hash_message(
+    record_hash_message = _build_legacy_record_hash_message(
         master_kid=stored_envelope["master_kid"],
         timestamp=stored_envelope["timestamp"],
         patient_id=stored_envelope["patient_id"],

@@ -122,11 +122,18 @@ def load_hospital_ca_signer() -> DSAManager:
 
     signer = DSAManager(private_bytes=pqc_private_key)
     signer.container_key = container_key
+    derived_pub = signer.get_public_bytes()
     try:
         ext = root_cert.extensions.get_extension_for_oid(OID_ML_DSA_65)
-        signer.pk = ext.value.value
+        ext_pub = ext.value.value
+        # Prefer key material derived from private key; extension is checked for drift only.
+        if derived_pub and ext_pub != derived_pub:
+            pass
+        elif derived_pub is None:
+            signer.pk = ext_pub
     except x509.ExtensionNotFound:
-        signer.pk = None
+        if derived_pub is None:
+            signer.pk = None
     return signer
 
 

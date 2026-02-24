@@ -16,9 +16,14 @@ async function handleResponse<T>(resp: Response): Promise<T> {
     window.location.href = '/patient'
     throw new Error('Session expired')
   }
-  const data = await resp.json()
+  let data: any = null
+  try {
+    data = await resp.json()
+  } catch {
+    data = null
+  }
   if (!resp.ok) {
-    throw new Error(data.detail || 'Request failed')
+    throw new Error((data && (data.detail || data.message)) || `Request failed (${resp.status})`)
   }
   return data as T
 }
@@ -29,9 +34,14 @@ export async function login(id: string, password: string): Promise<LoginResponse
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, password }),
   })
-  const data = await resp.json()
+  let data: any = null
+  try {
+    data = await resp.json()
+  } catch {
+    data = null
+  }
   if (!resp.ok) {
-    throw new Error(data.detail || 'Authentication failed')
+    throw new Error((data && (data.detail || data.message)) || `Authentication failed (${resp.status})`)
   }
   return data as LoginResponse
 }

@@ -24,6 +24,11 @@ class KeyID(BaseModel):
     alg: str = Field(..., description="Algorithm used (e.g., 'ML-DSA-65', 'Hybrid-KEM')")
     created_at: int
 
+    @field_validator("kid")
+    @classmethod
+    def _validate_kid_sha256_hex(cls, value: str) -> str:
+        return _require_sha256_hex(value, "kid")
+
 class ValidityCertificate(BaseModel):
     """
     Issued by Hospital (CA) to the Doctor.
@@ -35,6 +40,12 @@ class ValidityCertificate(BaseModel):
     issuer_id: str          
     valid_until: int
     signature: str          
+
+    @field_validator("doctor_public_key", "signature")
+    @classmethod
+    def _validate_b64_fields(cls, value: str, info) -> str:
+        _decode_b64(value, info.field_name)
+        return value
 
 class SecureEnvelope(BaseModel):
     """
@@ -48,6 +59,17 @@ class SecureEnvelope(BaseModel):
     payload_hash: str       # SHA-256 hash of encrypted payload bytes
     signature: str          # ML-DSA Signature over canonical context (includes payload_hash + metadata)
 
+    @field_validator("payload", "signature")
+    @classmethod
+    def _validate_b64_fields(cls, value: str, info) -> str:
+        _decode_b64(value, info.field_name)
+        return value
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_sha256_hex_fields(cls, value: str, info) -> str:
+        return _require_sha256_hex(value, info.field_name)
+
 
 class StoredVaultEnvelope(BaseModel):
     """
@@ -55,6 +77,7 @@ class StoredVaultEnvelope(BaseModel):
     """
     master_kid: str
     timestamp: int
+    doctor_id: str
     patient_id: str
     payload: str
     payload_hash: str       # SHA-256 of decoded payload bytes (nonce||ciphertext)
@@ -62,3 +85,14 @@ class StoredVaultEnvelope(BaseModel):
     hospital_signature: str # ML-DSA-65 signature over canonical record message
     hospital_pub: str       # Hospital public key at time of signing (rotation-safe)
     hospital_sig_alg: str   # Algorithm identifier (e.g. "ML-DSA-65")
+
+    @field_validator("payload", "hospital_pub", "hospital_signature")
+    @classmethod
+    def _validate_b64_fields(cls, value: str, info) -> str:
+        _decode_b64(value, info.field_name)
+        return value
+
+    @field_validator("payload_hash", "record_hash")
+    @classmethod
+    def _validate_sha256_hex_fields(cls, value: str, info) -> str:
+        return _require_sha256_hex(value, info.field_name)
