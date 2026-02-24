@@ -1,4 +1,23 @@
-from pydantic import BaseModel, Field
+import base64
+import binascii
+import re
+from typing import Literal
+from pydantic import BaseModel, Field, field_validator
+
+_SHA256_HEX_RE = re.compile(r"^[a-f0-9]{64}$")
+
+
+def _decode_b64(value: str, field_name: str) -> bytes:
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(f"{field_name} must be valid base64") from exc
+
+
+def _require_sha256_hex(value: str, field_name: str) -> str:
+    if not _SHA256_HEX_RE.fullmatch(value.lower()):
+        raise ValueError(f"{field_name} must be 64 hex chars")
+    return value.lower()
 
 class KeyID(BaseModel):
     kid: str = Field(..., description="Hash of the public key acting as ID")
@@ -32,7 +51,7 @@ class SecureEnvelope(BaseModel):
 
 class StoredVaultEnvelope(BaseModel):
     """
-    Server-side envelope stored at rest after master-key encryption.
+    Server-side envelope stored at rest with per-record envelope encryption.
     """
     master_kid: str
     timestamp: int
