@@ -17,7 +17,7 @@ def _get_crypto_logger() -> logging.Logger:
     logger.propagate = False
 
     log_dir = Path(__file__).resolve().parents[1] / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     logfile = log_dir / "crypto_audit.log"
 
     formatter = logging.Formatter(

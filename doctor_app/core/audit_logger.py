@@ -18,7 +18,7 @@ def get_audit_logger() -> logging.Logger:
 
     # Ensure logs directory exists
     log_dir = base_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     logfile = log_dir / "doctor_app.log"
 

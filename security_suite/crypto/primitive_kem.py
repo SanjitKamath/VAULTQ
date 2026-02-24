@@ -1,13 +1,14 @@
 from typing import Tuple
 from mlkem.ml_kem import ML_KEM
 from mlkem.parameter_set import ML_KEM_768
+import hmac
+import hashlib
 
 class KEMManager:
     """
     Manages Post-Quantum Key Encapsulation (ML-KEM-768) via mlkem.
     """
     def __init__(self, public_key: bytes = None, private_key: bytes = None):
-        # fast=True ensures we are utilizing the C-compiled backend for high performance
         self.impl = ML_KEM(ML_KEM_768, fast=True)
         self.pk = public_key
         self.sk = private_key
@@ -38,6 +39,20 @@ class KEMManager:
     def decapsulate(self, ciphertext: bytes, private_key: bytes) -> bytes:
         """
         Server: Recovers shared secret.
-        Returns: shared_secret
+        Returns: raw_shared_secret
         """
         return self.impl.decaps(private_key, ciphertext)
+    
+    def harden_secret(self, raw_secret: bytes, counter: int = 1) -> bytes:
+        """
+        Applies entropy smoothing and domain separation to the raw KEM secret.
+        This mirrors the logic from HybridSessionManager for local use.
+        """
+        # Step 1: Smoothing (Extract)
+        prk = hmac.new(b"", raw_secret, hashlib.sha256).digest()
+        
+        # Step 2: Context Binding (Expand)
+        ctr8 = counter.to_bytes(8, "big")
+        info = b"pqc-stage::" + ctr8
+        
+        return hmac.new(prk, info, hashlib.sha256).digest()

@@ -89,13 +89,13 @@
                                 <td class="py-4 px-4 text-right">
                                     <button x-show="doc.status !== 'active'" @click="issueCert(doc.id)" 
                                             class="text-xs px-3 py-1 rounded font-bold mr-2 transition-all"
-                                            :class="!doc.pqc_public_key_b64 ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500'"
-                                            :title="!doc.pqc_public_key_b64 ? 'Doctor must log in to the app first to enroll keys' : 'Issue Certificate'">
+                                            :class="!doc.csr_pem ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500'"
+                                            :title="!doc.csr_pem ? 'Doctor must submit CSR from app first' : 'Issue Certificate'">
                                         ISSUE CA CERT
                                     </button>
-                                    <button @click="updateDoctorPassword(doc.id)"
+                                    <button @click="recoverDoctorAccess(doc.id)"
                                             class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
-                                        CHANGE PASSWORD
+                                        FORGOT PASSWORD
                                     </button>
                                     <button @click="refreshCert(doc.id)"
                                             class="text-xs text-cyan-400 hover:text-cyan-300 font-bold mr-2">
@@ -126,31 +126,78 @@
             return {
                 stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, ca_algorithm: '...' },
                 doctors: [],
-                adminToken: localStorage.getItem('vaultq_admin_token') || '',
                 newDocName: '',        
                 lastProvisioned: null, 
+                csrfToken: sessionStorage.getItem('vaultq_admin_csrf') || '',
+                refreshRetries: 0,
+                maxRefreshRetries: 1,
 
-                init() {
-                    if (!this.adminToken) {
-                        const input = prompt("Enter admin token:");
-                        if (input) {
-                            this.adminToken = input.trim();
-                            localStorage.setItem('vaultq_admin_token', this.adminToken);
-                        }
+                async init() {
+                    await this.ensureAdminSession();
+                    await this.refresh();
+                },
+
+                async ensureAdminSession() {
+                    let check;
+                    try {
+                        check = await fetch('/api/admin/stats', { credentials: 'same-origin' });
+                    } catch (e) {
+                        alert("Network error checking admin session.");
+                        throw e;
                     }
-                    this.refresh();
+                    if (check.ok) return;
+
+                    const tokenInput = prompt("Enter admin token:");
+                    if (!tokenInput || !tokenInput.trim()) {
+                        alert("Admin token is required.");
+                        throw new Error("Admin token missing");
+                    }
+
+                    let sessionResp;
+                    try {
+                        sessionResp = await fetch('/api/auth/admin/session', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: tokenInput.trim() })
+                        });
+                    } catch (e) {
+                        alert("Network error creating admin session.");
+                        throw e;
+                    }
+                    if (!sessionResp.ok) {
+                        alert("Invalid admin token.");
+                        throw new Error("Admin session creation failed");
+                    }
+                    const sessionBody = await sessionResp.json().catch(() => ({}));
+                    this.csrfToken = sessionBody.csrf_token || '';
+                    sessionStorage.setItem('vaultq_admin_csrf', this.csrfToken);
                 },
 
                 authHeaders(extra = {}) {
-                    return { ...extra, 'x-admin-token': this.adminToken };
+                    const headers = { ...extra };
+                    if (this.csrfToken) {
+                        headers['X-CSRF-Token'] = this.csrfToken;
+                    }
+                    return headers;
                 },
 
                 async refresh() {
                     try {
                         const [statsRes, docsRes] = await Promise.all([
-                            fetch('/api/admin/stats', { headers: this.authHeaders() }),
-                            fetch('/api/admin/doctors', { headers: this.authHeaders() }),
+                            fetch('/api/admin/stats', { headers: this.authHeaders(), credentials: 'same-origin' }),
+                            fetch('/api/admin/doctors', { headers: this.authHeaders(), credentials: 'same-origin' }),
                         ]);
+                        if (statsRes.status === 401 || docsRes.status === 401) {
+                            if (this.refreshRetries >= this.maxRefreshRetries) {
+                                alert("Unable to refresh admin session. Please sign in again.");
+                                throw new Error("Admin session retry limit reached");
+                            }
+                            this.refreshRetries += 1;
+                            await this.ensureAdminSession();
+                            return this.refresh();
+                        }
+                        this.refreshRetries = 0;
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
                     } catch (e) {
@@ -165,6 +212,7 @@
                         const resp = await fetch(`/api/admin/doctors/provision?name=${encodeURIComponent(this.newDocName)}`, { 
                             method: 'POST',
                             headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         
                         if (resp.ok) {
@@ -184,6 +232,7 @@
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/issue-cert`, {
                             method: 'POST',
                             headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         if (resp.ok) {
                             await this.refresh(); // Immediate UI update
@@ -199,28 +248,24 @@
                     }
                 },
 
-                async updateDoctorPassword(doctorId) {
-                    const newPassword = prompt(`Enter a new password for ${doctorId}:`);
-                    if (newPassword === null) return;
-                    if (!newPassword.trim()) {
-                        alert("Password cannot be empty.");
-                        return;
-                    }
-
+                async recoverDoctorAccess(doctorId) {
+                    if (!confirm(`Recover ${doctorId}? This will revoke active certs and force key re-enrollment.`)) return;
                     try {
-                        const resp = await fetch(`/api/admin/doctors/${doctorId}/password`, {
-                            method: 'PUT',
-                            headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-                            body: JSON.stringify({ password: newPassword.trim() })
+                        const resp = await fetch(`/api/admin/doctors/${doctorId}/recover-access`, {
+                            method: 'POST',
+                            headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
+                        const body = await resp.json().catch(() => ({}));
                         if (!resp.ok) {
-                            const errorData = await resp.json().catch(() => ({}));
-                            alert(errorData.detail || "Failed to update password.");
+                            alert(body.detail || "Failed to recover doctor access.");
                             return;
                         }
-                        alert("Password updated successfully.");
+                        this.lastProvisioned = { id: body.doctor_id, password: body.password };
+                        alert(`Recovery credentials generated for ${body.doctor_id}. Active certs revoked: ${body.revoked_active_certs || 0}.`);
+                        await this.refresh();
                     } catch (e) {
-                        alert("Network error while updating password.");
+                        alert("Network error while recovering doctor access.");
                     }
                 },
 
@@ -230,6 +275,7 @@
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/refresh-cert`, {
                             method: 'POST',
                             headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         const body = await resp.json().catch(() => ({}));
                         if (!resp.ok) {
@@ -249,6 +295,7 @@
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/revoke-cert`, {
                             method: 'POST',
                             headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         const body = await resp.json().catch(() => ({}));
                         if (!resp.ok) {
@@ -267,6 +314,7 @@
                         const resp = await fetch(`/api/admin/doctors/${id}`, {
                             method: 'DELETE',
                             headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         if (resp.ok) {
                             await this.refresh(); 

@@ -14,33 +14,29 @@ class HybridSessionManager:
         [PROPRIETARY ALGORITHM]
         Hybrid key-derivation stage applied to the ML-KEM shared secret.
         """
-        # Use HMAC-SHA256 with empty salt to "smooth" the entropy of the PQC secret.
-        # This produces a pseudorandom key (PRK).
+        # 1. Smooth the entropy of the PQC secret (Extract)
         prk = hmac.new(b"", sk, hashlib.sha256).digest()
 
-        # Convert counter into 8-byte big-endian format.
+        # 2. Domain separation with counter and label (Expand)
         ctr8 = counter.to_bytes(8, "big")
-
-        # Context label binds this derivation specifically to the PQC stage.
         info = b"pqc-stage::" + ctr8
 
-        # Derive the final PQC stage key from the PRK and context label.
         return hmac.new(prk, info, hashlib.sha256).digest()
 
     @staticmethod
-    def derive_final_session_key(pqc_shared_secret: bytes, ecdh_shared_secret: bytes) -> bytes:
+    def derive_final_session_key(pqc_shared_secret: bytes, ecdh_shared_secret: bytes, counter: int = 1) -> bytes:
         """
-        Combines the Proprietary PQC Stage Key with the Classical ECDH Secret.
+        Combines the Hardened PQC Stage Key with the Classical ECDH Secret.
         """
-        # Apply custom PQC hardening KDF layer.
-        pqc_stage_key = HybridSessionManager.derive_seed_hybrid_fast(pqc_shared_secret, counter=1)
+        # Apply the smoothing and hardening layer to ML-KEM output
+        pqc_stage_key = HybridSessionManager.derive_seed_hybrid_fast(pqc_shared_secret, counter)
 
-        # Combine PQC and ECDH secrets into one master session key.
-        # pqc_stage_key is used as the HMAC key (acts like HKDF salt), while ecdh_secret is the input keying material.
+        # Mix the secrets. 
+        # Using the PQC key as the HMAC 'key' (salt) provides high computational 
+        # security even if the ECDH secret has lower entropy.
         final_key = hmac.new(pqc_stage_key, ecdh_shared_secret, hashlib.sha256).digest()
         
         return final_key
-
     @staticmethod
     def generate_session_proof(key: bytes) -> str:
         """

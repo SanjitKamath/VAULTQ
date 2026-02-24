@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import tempfile
 from pydantic import BaseModel
 from typing import Optional, List
 import secrets
@@ -15,6 +16,8 @@ class DoctorRecord(BaseModel):
     specialty: str = "General Practice"
     status: str = "pending"
     pqc_public_key_b64: Optional[str] = None
+    tls_public_key_pem: Optional[str] = None
+    csr_pem: Optional[str] = None
     password: Optional[str] = None
 
 class CertRecord(BaseModel):
@@ -56,12 +59,31 @@ class VaultQDatabase:
             self.audit.exception("DB load error: %s", str(e))
 
     def save_db(self):
-        self.db_file.parent.mkdir(parents=True, exist_ok=True)  
-        with open(self.db_file, "w") as f:
-            json.dump({
-                "doctors": self.doctors, 
-                "certificates": self.certificates
-            }, f, indent=4)
+        self.db_file.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.db_file.parent, 0o700)
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{self.db_file.name}.",
+            suffix=".tmp",
+            dir=str(self.db_file.parent),
+        )
+        try:
+            os.chmod(temp_path, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "doctors": self.doctors,
+                        "certificates": self.certificates,
+                    },
+                    f,
+                    indent=4,
+                )
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.db_file)
+            os.chmod(self.db_file, 0o600)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         self.audit.info(
             "DB save: persisted (doctors=%s certificates=%s)",
             len(self.doctors),
@@ -95,7 +117,9 @@ class VaultQDatabase:
             "password": password,
             "status": "authorized",
             "specialty": "General Practice",
-            "pqc_public_key_b64": None
+            "pqc_public_key_b64": None,
+            "tls_public_key_pem": None,
+            "csr_pem": None,
         }
         self.audit.info("DB add_pre_authorized_doctor: doctor_id=%s name=%s", doc_id, name)
         self.save_db()
