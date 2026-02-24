@@ -289,9 +289,9 @@ def provision_doctor(name: str, _: None = Depends(require_admin_token)):
     audit.info("Admin doctor provision requested for name=%s", name)
     doc_id = "doc_" + secrets.token_hex(3)
     temp_pass = _generate_temp_password()
-    
+
     # This method must call db.save_db() internally to reflect on disk immediately
     db.add_pre_authorized_doctor(doc_id, name, hash_password(temp_pass))
     audit.info("Admin doctor provision succeeded for doctor_id=%s", doc_id)
-    
+
     return {"id": doc_id, "password": temp_pass}

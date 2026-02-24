@@ -268,53 +268,18 @@ def receive_record(envelope: SecureEnvelope):
 
     # Encrypt payload with a per-record DEK, then encrypt DEK with the server master key.
     stored_timestamp = int(time.time())
-    storage_aad = _build_storage_aad(
+    record_hash_message = build_server_record_hash_message(
         master_kid=state.master_kid,
-        doctor_id=doctor_id,
-        patient_id=str(patient_id),
         timestamp=stored_timestamp,
+        patient_id=str(patient_id),
+        payload=stored_payload_b64,
+        payload_hash=stored_payload_hash,
     )
-    aad_hash = sha256_hex(storage_aad)
-    record_dek = AESGCM.generate_key(bit_length=256)
+    record_hash = sha256_hex(record_hash_message)
 
-    payload_nonce = os.urandom(12)
-    _print_crypto_data("Server plaintext (before DEK encryption)", payload_bytes)
-    payload_ciphertext = AESGCM(record_dek).encrypt(payload_nonce, payload_bytes, storage_aad)
-    _print_crypto_data("Server ciphertext (after DEK encryption)", payload_ciphertext)
-    stored_payload_bytes = payload_nonce + payload_ciphertext
-    stored_payload_hash = sha256_hex(stored_payload_bytes)
-
-    encrypted_dek_nonce = os.urandom(12)
-    encrypted_dek = AESGCM(state.master_key).encrypt(encrypted_dek_nonce, record_dek, storage_aad)
-    stored_encrypted_dek_bytes = encrypted_dek_nonce + encrypted_dek
-    stored_encrypted_dek_hash = sha256_hex(stored_encrypted_dek_bytes)
-
-    payload_nonce_b64 = base64.b64encode(payload_nonce).decode()
-    payload_ciphertext_b64 = base64.b64encode(payload_ciphertext).decode()
-    encrypted_dek_nonce_b64 = base64.b64encode(encrypted_dek_nonce).decode()
-    encrypted_dek_b64 = base64.b64encode(encrypted_dek).decode()
-    record_envelope: ServerVaultEnvelope = {
-        "envelope_version": STORED_ENVELOPE_VERSION,
-        "payload_cipher_alg": STORED_PAYLOAD_CIPHER_ALG,
-        "key_wrap_alg": STORED_KEY_WRAP_ALG,
-        "payload_nonce_b64": payload_nonce_b64,
-        "payload_ciphertext_b64": payload_ciphertext_b64,
-        "encrypted_dek_nonce_b64": encrypted_dek_nonce_b64,
-        "encrypted_dek_b64": encrypted_dek_b64,
-        "encrypted_dek_hash": stored_encrypted_dek_hash,
-        "aad_hash": aad_hash,
-    }
-
-    record_hash = sha256_hex(
-        build_server_record_hash_message(
-            master_kid=state.master_kid,
-            timestamp=stored_timestamp,
-            doctor_id=doctor_id,
-            patient_id=str(patient_id),
-            payload_hash=stored_payload_hash,
-            envelope=record_envelope,
-        )
-    )
+    # Hospital signs the record with its ML-DSA-65 CA key (rotation-safe: pub key embedded)
+    hospital_signature = state.hospital_ca.sign(record_hash_message)
+    audit.info("Hospital ML-DSA-65 signature applied to record for patient_id=%s", patient_id)
 
     stored_envelope = StoredVaultEnvelope(
         master_kid=state.master_kid,
@@ -332,6 +297,9 @@ def receive_record(envelope: SecureEnvelope):
         encrypted_dek_hash=stored_encrypted_dek_hash,
         aad_hash=aad_hash,
         record_hash=record_hash,
+        hospital_signature=base64.b64encode(hospital_signature).decode(),
+        hospital_pub=base64.b64encode(state.hospital_ca.get_public_bytes()).decode(),
+        hospital_sig_alg="ML-DSA-65",
     )
 
     # --- 4. STORE UNDER vault/<patient_id>/ ---

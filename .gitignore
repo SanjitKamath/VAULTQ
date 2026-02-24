@@ -5,3 +5,13 @@ __pycache__/
 .vscode/
 storage/
 *.log
+
+# React patient app
+patient_app/node_modules/
+patient_app/dist/
+
+# Security suite logs
+security_suite/logs/
+
+# Test artifacts
+test_patient_viewer.py

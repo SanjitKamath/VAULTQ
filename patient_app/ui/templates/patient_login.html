@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VaultQ | Patient Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs" defer></script>
+    <style>
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.6s ease-out; }
+        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); } 70% { box-shadow: 0 0 0 12px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+        .pulse-ring { animation: pulse-ring 2s infinite; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans antialiased min-h-screen flex items-center justify-center">
+
+    <div class="w-full max-w-md fade-in" x-data="loginApp()">
+        <!-- Logo + Title -->
+        <div class="text-center mb-8">
+            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 mx-auto mb-4 pulse-ring">
+                <span class="font-bold text-white text-2xl tracking-tighter">VQ</span>
+            </div>
+            <h1 class="text-3xl font-bold text-white">VaultQ</h1>
+            <p class="text-slate-400 mt-1">Patient Secure Portal</p>
+        </div>
+
+        <!-- Login Card -->
+        <div class="bg-gray-900 p-8 rounded-2xl border border-gray-800 shadow-2xl">
+            <h2 class="text-xl font-bold text-emerald-400 mb-6">Sign In</h2>
+
+            <!-- Error Message -->
+            <div x-show="errorMsg" x-transition
+                 class="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-red-300 text-sm">
+                <span x-text="errorMsg"></span>
+            </div>
+
+            <form @submit.prevent="login()">
+                <div class="mb-5">
+                    <label class="block text-xs text-gray-400 uppercase tracking-wider mb-2">Patient ID</label>
+                    <input type="text" x-model="patientId" placeholder="pat_xxxxxx" required
+                        class="w-full bg-black border border-gray-700 p-3 rounded-lg text-white font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-xs text-gray-400 uppercase tracking-wider mb-2">Password</label>
+                    <input type="password" x-model="password" placeholder="Enter your password" required
+                        class="w-full bg-black border border-gray-700 p-3 rounded-lg text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition">
+                </div>
+                <button type="submit" :disabled="loading"
+                        class="w-full bg-emerald-600 py-3 rounded-lg font-bold text-white hover:bg-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                    <span x-show="!loading">Access Secure Portal</span>
+                    <span x-show="loading">Authenticating...</span>
+                </button>
+            </form>
+        </div>
+
+        <p class="text-center text-slate-600 text-xs mt-6">
+            End-to-end encrypted medical record portal
+        </p>
+    </div>
+
+    <script>
+        function loginApp() {
+            return {
+                patientId: '',
+                password: '',
+                errorMsg: '',
+                loading: false,
+
+                async login() {
+                    this.errorMsg = '';
+                    this.loading = true;
+                    try {
+                        const resp = await fetch('/api/patient/auth/login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: this.patientId.trim(), password: this.password }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) {
+                            this.errorMsg = data.detail || 'Authentication failed.';
+                            return;
+                        }
+                        // Store session and redirect to dashboard
+                        sessionStorage.setItem('vaultq_patient_token', data.token);
+                        sessionStorage.setItem('vaultq_patient_name', data.name);
+                        sessionStorage.setItem('vaultq_patient_id', this.patientId.trim());
+                        window.location.href = '/patient/dashboard';
+                    } catch (e) {
+                        this.errorMsg = 'Network error: Could not reach server.';
+                    } finally {
+                        this.loading = false;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -18,15 +18,17 @@ except ValueError as exc:
     ) from exc
 REQUIRE_MTLS = os.getenv("VAULTQ_REQUIRE_MTLS", "0") == "1"
 
-# Define template directory for the admin dashboard
+# Define directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "ui", "templates")
+PATIENT_BUILD_DIR = os.path.join(BASE_DIR, "..", "patient_app", "dist")
 
 # Include API routers (handshake_api is removed since TLS handles it)
-from .routers import doctor_api, admin_api, auth_api
+from .routers import doctor_api, admin_api, auth_api, patient_api
 app.include_router(doctor_api.router)
 app.include_router(admin_api.router)
 app.include_router(auth_api.router)
+app.include_router(patient_api.router)
 
 
 @app.middleware("http")
@@ -61,6 +63,19 @@ async def upload_size_guard(request: Request, call_next):
 def admin_dashboard():
     with open(os.path.join(TEMPLATE_DIR, "admin.html"), "r") as f:
         return f.read()
+
+# Patient Portal: serve React build (static assets + SPA catch-all)
+_patient_assets_dir = os.path.join(PATIENT_BUILD_DIR, "assets")
+if os.path.isdir(_patient_assets_dir):
+    app.mount("/patient/assets", StaticFiles(directory=_patient_assets_dir), name="patient-assets")
+
+@app.get("/patient")
+def patient_spa_root():
+    return FileResponse(os.path.join(PATIENT_BUILD_DIR, "index.html"))
+
+@app.get("/patient/{full_path:path}")
+def patient_spa_catchall(full_path: str = ""):
+    return FileResponse(os.path.join(PATIENT_BUILD_DIR, "index.html"))
 
 def start_secure_server():
     """Starts the Uvicorn server with TLS on port 8080, optional mTLS via env flag."""

@@ -32,6 +32,7 @@ def _cert_dir() -> Path:
 def bootstrap_hospital_root_ca() -> x509.Certificate:
     """
     Generates a Self-Signed X.509 Root Certificate for the Hospital.
+    Persists the ML-DSA-65 keypair alongside the cert for cross-restart consistency.
     """
     cert_dir = _cert_dir()
     cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)

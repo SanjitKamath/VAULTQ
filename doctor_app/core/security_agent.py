@@ -142,7 +142,7 @@ class SecurityAgent:
             "patient_id": patient_id,
             "encrypted_payload": base64.b64encode(encrypted_payload).decode(),
             "doctor_signature": base64.b64encode(signature).decode(),
-            "doctor_public_key": encoded_pub_key 
+            "doctor_public_key": encoded_pub_key
         }
 
     def process_and_upload(self, form: UploadForm):
