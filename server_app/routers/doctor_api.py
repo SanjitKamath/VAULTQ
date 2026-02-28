@@ -346,10 +346,13 @@ def receive_record(envelope: SecureEnvelope):
     )
 
     # --- 4. STORE UNDER vault/<patient_id>/ ---
+    patient_dir = os.path.join(STORAGE_DIR, _safe_path_component(str(patient_id)))
+    os.makedirs(patient_dir, mode=0o700, exist_ok=True)
     record_id = f"rec_{int(time.time())}_{_safe_path_component(base64.b64encode(os.urandom(6)).decode())}"
-    storage_path = state.vault_storage.save_record(
-        str(patient_id), record_id, stored_envelope.model_dump()
-    )
+    file_path = os.path.join(patient_dir, f"{record_id}.json")
+
+    with open(file_path, "w") as f:
+        json.dump(stored_envelope.model_dump(), f, indent=4)
 
     integrity_event_path = append_integrity_event(
         {
@@ -374,15 +377,15 @@ def receive_record(envelope: SecureEnvelope):
         
     audit.info(
         "Upload stored: doctor_id=%s patient_id=%s record_id=%s master_kid=%s path=%s integrity_log=%s",
-        doctor_id, patient_id, record_id, state.master_kid, storage_path, integrity_event_path,
+        doctor_id, patient_id, record_id, state.master_kid, file_path, integrity_event_path,
     )
-
+    
     return {
         "status": "Verified, re-encrypted with master key, and secured",
         "record_id": record_id,
         "patient_id": patient_id,
         "master_kid": state.master_kid,
-        "saved_to": storage_path
+        "saved_to": file_path
     }
 
 

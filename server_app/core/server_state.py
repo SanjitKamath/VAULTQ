@@ -1,4 +1,3 @@
-import os
 import threading
 import time
 import heapq
@@ -33,16 +32,6 @@ class ServerState:
         # Server-side at-rest master key (persistent across restarts)
         self.master_kid, self.master_key = MasterKeyStore().load_or_create()
         self.audit.info("ServerState init: at-rest master key loaded (master_kid=%s)", self.master_kid)
-
-        # Vault storage backend (local filesystem or GCS)
-        backend = os.environ.get("VAULTQ_STORAGE_BACKEND", "local").lower()
-        if backend == "gcs":
-            from .vault_storage import GCSVaultStorage
-            self.vault_storage = GCSVaultStorage()
-        else:
-            from .vault_storage import LocalVaultStorage
-            self.vault_storage = LocalVaultStorage()
-        self.audit.info("ServerState init: vault storage backend=%s", backend)
 
     def replay_seen_or_store(self, message_id: str, ttl_seconds: int) -> bool:
         """
