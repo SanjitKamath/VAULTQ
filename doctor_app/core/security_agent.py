@@ -233,6 +233,7 @@ class SecurityAgent:
         return {
             "nonce": base64.b64encode(nonce).decode(),
             "wrapped_dek": base64.b64encode(wrapped_dek).decode(),
+            "dek_b64": base64.b64encode(dek).decode(),
             "patient_id": patient_id,
             "encrypted_payload": base64.b64encode(encrypted_payload).decode(),
             "doctor_signature": base64.b64encode(signature).decode(),
