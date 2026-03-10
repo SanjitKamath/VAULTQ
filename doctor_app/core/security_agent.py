@@ -7,9 +7,11 @@ from pathlib import Path
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.keywrap import aes_key_wrap
+
 from security_suite.crypto import DSAManager
 from security_suite.security.models import SecureEnvelope
 from security_suite.security.integrity import sha256_hex, build_doctor_signature_message
+
 from .config import config
 from .models import UploadForm
 from .audit_logger import get_audit_logger
@@ -18,6 +20,8 @@ UPLOAD_TIMEOUT_SECONDS = float(os.getenv("VAULTQ_UPLOAD_TIMEOUT_SECONDS", "30"))
 
 
 def _print_crypto_data(label: str, data: bytes):
+    if os.getenv("VAULTQ_DEBUG_CRYPTO", "0") != "1":
+        return
     full_dump = os.getenv("VAULTQ_DEBUG_FULL_DUMPS", "0") == "1"
     if full_dump:
         print(f"[CRYPTO DEBUG] {label} (len={len(data)} bytes): {base64.b64encode(data).decode()}")
@@ -181,22 +185,19 @@ class SecurityAgent:
                 except Exception as retry_exc:
                     self.audit.warning("mTLS recovery retry failed for doctor_id=%s: %s", self.doctor_id, str(retry_exc))
 
-                admin_base = str(getattr(config, "admin_url", "") or getattr(config, "pre_enroll_url", "")).rstrip("/")
-                admin_url = admin_base if admin_base.lower().endswith("/admin") else f"{admin_base}/admin"
-                hint = (
-                    "mTLS handshake rejected by server (client cert likely invalid/revoked). "
-                    f"Refresh/issue cert via {admin_url} and sign in again."
-                )
-                self.log(f"mTLS Connection Failed: {hint}", "ERROR")
-                self.audit.exception(
-                    "mTLS connection failed for doctor_id=%s: %s (hint=%s)",
-                    self.doctor_id,
-                    msg,
-                    hint,
-                )
-            else:
-                self.log(f"mTLS Connection Failed: {msg}", "ERROR")
-                self.audit.exception("mTLS connection failed for doctor_id=%s: %s", self.doctor_id, msg)
+            admin_base = str(getattr(config, "admin_url", "") or getattr(config, "pre_enroll_url", "")).rstrip("/")
+            admin_url = admin_base if admin_base.lower().endswith("/admin") else f"{admin_base}/admin"
+            hint = (
+                "mTLS handshake rejected by server (client cert likely invalid/revoked). "
+                f"Refresh/issue cert via {admin_url} and sign in again."
+            )
+            self.log(f"mTLS Connection Failed: {hint}", "ERROR")
+            self.audit.exception(
+                "mTLS connection failed for doctor_id=%s: %s (hint=%s)",
+                self.doctor_id,
+                msg,
+                hint,
+            )
             self.update_status(False)
 
     def prepare_patient_payload(self, patient_id: str, file_data: bytes) -> dict:

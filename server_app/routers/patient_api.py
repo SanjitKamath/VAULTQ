@@ -5,14 +5,13 @@ import time
 import secrets
 import string
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Header, Depends, Request
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ..core.database import db
 from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import verify_password, hash_password
-from ..core.admin_auth import require_admin_token
 from security_suite.security.integrity import sha256_hex
 from security_suite.crypto import DSAManager
 
@@ -75,15 +74,19 @@ def _build_legacy_record_hash_message(*, master_kid: str, timestamp: int, patien
 class PatientPasswordUpdateRequest(BaseModel):
     password: str
 
+def require_admin_session(request: Request):
+    session_cookie = request.cookies.get("admin_session")
+    if not session_cookie or session_cookie != state.admin_session_token:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
 
 @router.get("/admin/list")
-def list_patients(_: None = Depends(require_admin_token)):
+def list_patients(_: None = Depends(require_admin_session)):
     audit.info("Admin patient list requested")
     return db.get_all_patients()
 
 
 @router.post("/admin/provision")
-def provision_patient(name: str, _: None = Depends(require_admin_token)):
+def provision_patient(name: str, _: None = Depends(require_admin_session)):
     """Generates random patient credentials and saves them to the persistent JSON."""
     audit.info("Admin patient provision requested for name=%s", name)
     pat_id = "pat_" + secrets.token_hex(3)
@@ -94,7 +97,7 @@ def provision_patient(name: str, _: None = Depends(require_admin_token)):
 
 
 @router.put("/admin/{patient_id}/password")
-def set_patient_password(patient_id: str, payload: PatientPasswordUpdateRequest, _: None = Depends(require_admin_token)):
+def set_patient_password(patient_id: str, payload: PatientPasswordUpdateRequest, _: None = Depends(require_admin_session)):
     audit.info("Admin password update requested for patient_id=%s", patient_id)
     pat = db.patients.get(patient_id)
     if not pat:
@@ -109,7 +112,7 @@ def set_patient_password(patient_id: str, payload: PatientPasswordUpdateRequest,
 
 
 @router.delete("/admin/{patient_id}")
-def delete_patient(patient_id: str, _: None = Depends(require_admin_token)):
+def delete_patient(patient_id: str, _: None = Depends(require_admin_session)):
     audit.info("Admin patient delete requested for patient_id=%s", patient_id)
     success = db.delete_patient(patient_id)
     if not success:

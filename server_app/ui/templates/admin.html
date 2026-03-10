@@ -7,281 +7,476 @@
     <title>VaultQ | System Administration</title>
     <link rel="stylesheet" href="/admin/static/admin.tailwind.css" integrity="sha384-VINUIuRueYPCfmQYB23tL8t+S7KEg8ti6p7XkGStuVsdPfUhvYthgoqzwVSrgnbq" crossorigin="anonymous">
     <script src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js" integrity="sha384-9Ax3MmS9AClxJyd5/zafcXXjxmwFhZCdsT6HJoJjarvCaAkJlk5QDzjLJm+Wdx5F" crossorigin="anonymous" defer></script>
-</head>
-<body class="bg-slate-950 text-slate-200 font-sans antialiased">
+    <style>
 
-    <div class="min-h-screen flex flex-col" x-data="adminApp()">
-        <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
+        [x-cloak]{display:none!important}
+
+        /* Background */
+
+        body{
+        background:
+        radial-gradient(circle at 15% 20%,rgba(34,211,238,.06),transparent 40%),
+        radial-gradient(circle at 85% 0%,rgba(99,102,241,.10),transparent 45%),
+        #020617;
+        }
+
+
+        /* Scrollbar */
+
+        ::-webkit-scrollbar{width:6px;height:6px}
+        ::-webkit-scrollbar-thumb{
+        background:#334155;
+        border-radius:10px;
+        }
+        ::-webkit-scrollbar-thumb:hover{
+        background:#475569
+        }
+
+
+        /* Card system */
+
+        .admin-card{
+        background:rgba(15,23,42,.65);
+        backdrop-filter:blur(12px);
+        border:1px solid rgba(148,163,184,.12);
+        border-radius:14px;
+        box-shadow:
+        0 10px 30px rgba(0,0,0,.35),
+        0 1px 0 rgba(255,255,255,.04) inset;
+        transition:
+        transform .25s ease,
+        box-shadow .25s ease,
+        border .25s ease;
+        }
+
+        .admin-card:hover{
+        transform:translateY(-3px);
+        box-shadow:
+        0 16px 40px rgba(0,0,0,.45),
+        0 1px 0 rgba(255,255,255,.05) inset;
+        border-color:rgba(148,163,184,.25);
+        }
+
+
+        /* Inputs */
+
+        .admin-input{
+        background:#020617;
+        border:1px solid #334155;
+        border-radius:10px;
+        padding:12px 14px;
+        font-size:14px;
+        transition:
+        border .2s ease,
+        box-shadow .2s ease,
+        background .2s ease;
+        }
+
+        .admin-input:focus{
+        outline:none;
+        border-color:#22d3ee;
+        box-shadow:0 0 0 1px #22d3ee;
+        background:#000;
+        }
+
+
+        /* Buttons */
+
+        .admin-btn{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        padding:12px 22px;
+        font-size:14px;
+        font-weight:600;
+        border-radius:10px;
+        transition:
+        transform .15s ease,
+        box-shadow .15s ease,
+        background .2s ease;
+        }
+
+        .admin-btn:hover{
+        transform:translateY(-1px);
+        }
+
+        .admin-btn:active{
+        transform:translateY(0);
+        }
+
+
+        /* Colored buttons */
+
+        .btn-cyan{
+        background:#0891b2;
+        }
+
+        .btn-cyan:hover{
+        background:#06b6d4;
+        box-shadow:0 6px 16px rgba(6,182,212,.35);
+        }
+
+        .btn-emerald{
+        background:#059669;
+        }
+
+        .btn-emerald:hover{
+        background:#10b981;
+        box-shadow:0 6px 16px rgba(16,185,129,.35);
+        }
+
+
+        /* Sidebar buttons */
+
+        .sidebar-btn{
+        border-radius:10px;
+        padding:10px 14px;
+        font-size:14px;
+        font-weight:500;
+        transition:
+        background .25s ease,
+        color .25s ease,
+        transform .15s ease;
+        }
+
+        .sidebar-btn:hover{
+        background:rgba(148,163,184,.08);
+        transform:translateX(2px);
+        }
+
+
+        /* Tables */
+
+        .admin-table th{
+        font-size:11px;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        color:#94a3b8;
+        }
+
+        .admin-table td{
+        font-size:14px;
+        }
+
+        .table-row{
+        transition:
+        background .2s ease,
+        transform .15s ease;
+        }
+
+        .table-row:hover{
+        background:rgba(148,163,184,.06);
+        transform:scale(1.005);
+        }
+
+
+        /* Credential reveal animation */
+
+        .credential-box{
+        animation:fadeSlide .35s ease;
+        }
+
+        @keyframes fadeSlide{
+        0%{
+        opacity:0;
+        transform:translateY(6px);
+        }
+        100%{
+        opacity:1;
+        transform:translateY(0);
+        }
+        }
+
+
+        /* Tab transition */
+
+        .tab-panel{
+        animation:tabFade .35s ease;
+        }
+
+        @keyframes tabFade{
+        0%{
+        opacity:0;
+        transform:translateY(6px);
+        }
+        100%{
+        opacity:1;
+        transform:translateY(0);
+        }
+        }
+
+
+        /* Subtle glow effect */
+
+        .glow-cyan{
+        box-shadow:0 0 18px rgba(34,211,238,.25);
+        }
+
+        .glow-emerald{
+        box-shadow:0 0 18px rgba(16,185,129,.25);
+        }
+
+        </style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans antialiased min-h-screen flex flex-col selection:bg-cyan-500/30">
+
+    <div class="flex-1 flex flex-col" x-data="adminApp()">
+        
+        <header class="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-6 py-4 flex justify-between items-center shadow-sm">
             <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                    <span class="font-bold text-white tracking-tighter">VQ</span>
+                <div class="w-8 h-8 rounded bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center shadow-md">
+                    <span class="font-bold text-white text-sm tracking-tighter">VQ</span>
                 </div>
-                <h1 class="text-xl font-bold tracking-wide text-white">VaultQ <span class="text-slate-500 font-light">Admin Control</span></h1>
+                <h1 class="text-lg font-bold tracking-wide text-white">VaultQ <span class="text-slate-500 font-light">Admin</span></h1>
             </div>
             <div class="flex items-center gap-4 text-sm">
-                <span class="flex items-center gap-2">
-                    <div class="w-2 h-2 rounded-full" :class="stats.ca_status === 'Online' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'"></div> 
-                    CA <span x-text="stats.ca_status"></span>
+                <span class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-md border border-slate-800 shadow-inner">
+                    <div class="w-2 h-2 rounded-full" :class="stats.ca_status === 'Online' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'"></div> 
+                    <span class="text-slate-400">CA Status:</span> <span class="font-bold text-slate-200" x-text="stats.ca_status"></span>
                 </span>
             </div>
         </header>
 
-        <main class="max-w-6xl mx-auto p-6 w-full">
-            <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
-                <h3 class="text-xl font-bold mb-4 text-cyan-400">Provision New Doctor</h3>
-                <p class="text-gray-400 text-sm mb-4">Enter the doctor's name to generate their initial VaultQ credentials.</p>
+        <div class="flex flex-1 w-full max-w-[1600px] mx-auto">
+            
+            <aside class="w-64 shrink-0 bg-slate-950/50 border-r border-slate-800 flex flex-col py-8 px-4 gap-2 z-10 hidden md:flex">
+                <div class="text-[30px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2"></div>
                 
-                <div class="flex gap-4">
-                    <input type="text" x-model="newDocName" placeholder="Doctor's Full Name" 
-                        class="bg-black border border-gray-700 p-3 rounded-lg flex-1 text-white focus:border-cyan-500 outline-none">
-                    <button @click="provisionDoctor()" 
-                            class="bg-cyan-600 px-8 py-3 rounded-lg font-bold hover:bg-cyan-500 transition-all">
-                        Generate Credentials
-                    </button>
-                </div>
+                <button @click="activeTab = 'patients'"
+                        class="flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all duration-200 text-sm text-left group"
+                        :class="activeTab === 'patients' 
+                            ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20' 
+                            : 'text-slate-400 border border-transparent hover:bg-slate-800/50 hover:text-slate-200'">
+                    Patient Portal
+                </button>
 
-                <div x-show="lastProvisioned" x-transition class="mt-6 p-4 bg-cyan-900/20 border border-cyan-500/50 rounded-lg">
-                    <h4 class="font-bold text-cyan-300 mb-2">Credentials Created Successfully!</h4>
-                    <p class="text-sm text-gray-300 mb-2">Provide these to the doctor for their first-time enrollment:</p>
-                    <div class="grid grid-cols-2 gap-4 bg-black p-3 rounded border border-gray-800">
-                        <div>
-                            <span class="text-xs text-gray-500 block uppercase">Doctor ID</span>
-                            <span class="font-mono text-lg text-white" x-text="lastProvisioned?.id"></span>
+                <button @click="activeTab = 'doctors'"
+                        class="flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all duration-200 text-sm text-left group"
+                        :class="activeTab === 'doctors' 
+                            ? 'text-cyan-400 bg-cyan-500/10 border border-cyan-500/20' 
+                            : 'text-slate-400 border border-transparent hover:bg-slate-800/50 hover:text-slate-200'">
+                    Doctor Portal
+                </button>
+            </aside>
+
+            <main class="flex-1 min-w-0 p-6 lg:p-10 relative">
+                <div class="max-w-6xl mx-auto w-full">
+
+                    <div x-show="activeTab === 'patients'" 
+                         x-transition:enter="transition ease-out duration-300"
+                         x-transition:enter-start="opacity-0 translate-y-2"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         style="display: none;">
+                        
+                        <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
+                            <h3 class="text-xl font-bold mb-4 text-emerald-400">Provision New Patient</h3>
+                            <p class="text-gray-400 text-sm mb-4">Enter the patient's name to generate their VaultQ portal credentials.</p>
+                            <div class="flex gap-4">
+                                <input type="text" x-model="newPatientName" placeholder="Patient's Full Name"
+                                    class="bg-black border border-gray-700 p-3 rounded-lg flex-1 text-white focus:border-emerald-500 outline-none">
+                                <button @click="provisionPatient()"
+                                        class="bg-emerald-600 px-8 py-3 rounded-lg font-bold hover:bg-emerald-500 transition-all">
+                                    Generate Credentials
+                                </button>
+                            </div>
+                            <div x-show="lastProvisionedPatient" x-transition class="mt-6 p-4 bg-emerald-900/20 border border-emerald-500/50 rounded-lg">
+                                <h4 class="font-bold text-emerald-300 mb-2">Patient Credentials Created!</h4>
+                                <p class="text-sm text-gray-300 mb-2">Provide these to the patient for portal login:</p>
+                                <div class="grid grid-cols-2 gap-4 bg-black p-3 rounded border border-gray-800">
+                                    <div>
+                                        <span class="text-xs text-gray-500 block uppercase">Patient ID</span>
+                                        <span class="font-mono text-lg text-white" x-text="lastProvisionedPatient?.id"></span>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500 block uppercase">Temporary Password</span>
+                                        <span class="font-mono text-lg text-yellow-400" x-text="lastProvisionedPatient?.password"></span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <span class="text-xs text-gray-500 block uppercase">Temporary Password</span>
-                            <span class="font-mono text-lg text-yellow-400" x-text="lastProvisioned?.password"></span>
+
+                        <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl mb-8">
+                            <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                                <h2 class="text-xl font-bold">Registered Patients</h2>
+                                <button @click="refresh()" class="text-sm text-emerald-500 hover:underline">Refresh</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left whitespace-nowrap">
+                                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
+                                        <tr>
+                                            <th class="py-4 px-4">Patient ID</th>
+                                            <th class="py-4 px-4">Name</th>
+                                            <th class="py-4 px-4">Status</th>
+                                            <th class="py-4 px-4">Password</th>
+                                            <th class="py-4 px-4 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template x-for="pat in patients" :key="pat.id">
+                                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
+                                                <td class="py-4 px-4 font-mono text-emerald-400" x-text="pat.id"></td>
+                                                <td class="py-4 px-4 font-bold" x-text="pat.name"></td>
+                                                <td class="py-4 px-4">
+                                                    <span class="px-2 py-1 rounded text-xs uppercase font-bold bg-green-900/30 text-green-400" x-text="pat.status"></span>
+                                                </td>
+                                                <td class="py-4 px-4">
+                                                    <span class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 font-mono text-xs tracking-wider text-slate-300">HASHED ONLY</span>
+                                                </td>
+                                                <td class="py-4 px-4 text-right">
+                                                    <button @click="updatePatientPassword(pat.id)"
+                                                            class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
+                                                        CHANGE PASSWORD
+                                                    </button>
+                                                    <button @click="deletePatient(pat.id)"
+                                                            class="text-xs text-red-500 hover:text-red-400 font-bold">
+                                                        DELETE
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="patients.length === 0">
+                                            <td colspan="5" class="py-12 text-center text-slate-500 italic">No patients provisioned yet.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <!-- Patient Provisioning Section -->
-            <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
-                <h3 class="text-xl font-bold mb-4 text-emerald-400">Provision New Patient</h3>
-                <p class="text-gray-400 text-sm mb-4">Enter the patient's name to generate their VaultQ portal credentials.</p>
-                <div class="flex gap-4">
-                    <input type="text" x-model="newPatientName" placeholder="Patient's Full Name"
-                        class="bg-black border border-gray-700 p-3 rounded-lg flex-1 text-white focus:border-emerald-500 outline-none">
-                    <button @click="provisionPatient()"
-                            class="bg-emerald-600 px-8 py-3 rounded-lg font-bold hover:bg-emerald-500 transition-all">
-                        Generate Credentials
-                    </button>
-                </div>
-                <div x-show="lastProvisionedPatient" x-transition class="mt-6 p-4 bg-emerald-900/20 border border-emerald-500/50 rounded-lg">
-                    <h4 class="font-bold text-emerald-300 mb-2">Patient Credentials Created!</h4>
-                    <p class="text-sm text-gray-300 mb-2">Provide these to the patient for portal login:</p>
-                    <div class="grid grid-cols-2 gap-4 bg-black p-3 rounded border border-gray-800">
-                        <div>
-                            <span class="text-xs text-gray-500 block uppercase">Patient ID</span>
-                            <span class="font-mono text-lg text-white" x-text="lastProvisionedPatient?.id"></span>
+                    <div x-show="activeTab === 'doctors'" 
+                         x-transition:enter="transition ease-out duration-300"
+                         x-transition:enter-start="opacity-0 translate-y-2"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         style="display: none;">
+                        
+                        <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
+                            <h3 class="text-xl font-bold mb-4 text-cyan-400">Provision New Doctor</h3>
+                            <p class="text-gray-400 text-sm mb-4">Enter the doctor's name to generate their initial VaultQ credentials.</p>
+                            
+                            <div class="flex gap-4">
+                                <input type="text" x-model="newDocName" placeholder="Doctor's Full Name" 
+                                    class="bg-black border border-gray-700 p-3 rounded-lg flex-1 text-white focus:border-cyan-500 outline-none">
+                                <button @click="provisionDoctor()" 
+                                        class="bg-cyan-600 px-8 py-3 rounded-lg font-bold hover:bg-cyan-500 transition-all">
+                                    Generate Credentials
+                                </button>
+                            </div>
+
+                            <div x-show="lastProvisioned" x-transition class="mt-6 p-4 bg-cyan-900/20 border border-cyan-500/50 rounded-lg">
+                                <h4 class="font-bold text-cyan-300 mb-2">Credentials Created Successfully!</h4>
+                                <p class="text-sm text-gray-300 mb-2">Provide these to the doctor for their first-time enrollment:</p>
+                                <div class="grid grid-cols-2 gap-4 bg-black p-3 rounded border border-gray-800">
+                                    <div>
+                                        <span class="text-xs text-gray-500 block uppercase">Doctor ID</span>
+                                        <span class="font-mono text-lg text-white" x-text="lastProvisioned?.id"></span>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500 block uppercase">Temporary Password</span>
+                                        <span class="font-mono text-lg text-yellow-400" x-text="lastProvisioned?.password"></span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <span class="text-xs text-gray-500 block uppercase">Temporary Password</span>
-                            <span class="font-mono text-lg text-yellow-400" x-text="lastProvisionedPatient?.password"></span>
+
+                        <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
+                            <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                                <h2 class="text-xl font-bold">Authorized Personnel</h2>
+                                <button @click="refresh()" class="text-sm text-cyan-500 hover:underline">Refresh List</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left whitespace-nowrap">
+                                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
+                                        <tr>
+                                            <th class="py-4 px-4">Doctor ID</th>
+                                            <th class="py-4 px-4">Name</th>
+                                            <th class="py-4 px-4">Status</th>
+                                            <th class="py-4 px-4">Password</th>
+                                            <th class="py-4 px-4 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template x-for="doc in doctors" :key="doc.id">
+                                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
+                                                <td class="py-4 px-4 font-mono text-cyan-400" x-text="doc.id"></td>
+                                                <td class="py-4 px-4 font-bold" x-text="doc.name"></td>
+                                                <td class="py-4 px-4">
+                                                    <span x-text="doc.status" 
+                                                        :class="doc.status === 'active' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'"
+                                                        class="px-2 py-1 rounded text-xs uppercase font-bold">
+                                                    </span>
+                                                </td>
+                                                <td class="py-4 px-4">
+                                                    <span class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 font-mono text-xs tracking-wider text-slate-300">
+                                                        HASHED ONLY
+                                                    </span>
+                                                </td>
+                                                <td class="py-4 px-4 text-right">
+                                                    <button x-show="doc.status !== 'active'" @click="issueCert(doc.id)" 
+                                                            class="text-xs px-3 py-1 rounded font-bold mr-2 transition-all"
+                                                            :class="!doc.csr_pem ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500'"
+                                                            :title="!doc.csr_pem ? 'Doctor must submit CSR from app first' : 'Issue Certificate'">
+                                                        ISSUE CA CERT
+                                                    </button>
+                                                    <button @click="recoverDoctorAccess(doc.id)"
+                                                            class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
+                                                        FORGOT PASSWORD
+                                                    </button>
+                                                    <button @click="refreshCert(doc.id)"
+                                                            class="text-xs text-cyan-400 hover:text-cyan-300 font-bold mr-2">
+                                                        REFRESH CERT
+                                                    </button>
+                                                    <button @click="revokeCert(doc.id)"
+                                                            class="text-xs text-orange-400 hover:text-orange-300 font-bold mr-2">
+                                                        REVOKE CERT
+                                                    </button>
+                                                    <button @click="deleteDoctor(doc.id)" 
+                                                            class="text-xs text-red-500 hover:text-red-400 font-bold">
+                                                        DELETE
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="doctors.length === 0">
+                                            <td colspan="5" class="py-12 text-center text-slate-500 italic">No doctors provisioned yet.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <!-- Patient Table -->
-            <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl mb-8">
-                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-                    <h2 class="text-xl font-bold">Registered Patients</h2>
-                    <button @click="refresh()" class="text-sm text-emerald-500 hover:underline">Refresh</button>
                 </div>
-                <table class="w-full text-left">
-                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
-                        <tr>
-                            <th class="py-4 px-4">Patient ID</th>
-                            <th class="py-4 px-4">Name</th>
-                            <th class="py-4 px-4">Status</th>
-                            <th class="py-4 px-4">Password</th>
-                            <th class="py-4 px-4 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="pat in patients" :key="pat.id">
-                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
-                                <td class="py-4 px-4 font-mono text-emerald-400" x-text="pat.id"></td>
-                                <td class="py-4 px-4 font-bold" x-text="pat.name"></td>
-                                <td class="py-4 px-4">
-                                    <span class="px-2 py-1 rounded text-xs uppercase font-bold bg-green-900/30 text-green-400" x-text="pat.status"></span>
-                                </td>
-                                <td class="py-4 px-4">
-                                    <span class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 font-mono text-xs tracking-wider text-slate-300">HASHED ONLY</span>
-                                </td>
-                                <td class="py-4 px-4 text-right">
-                                    <button @click="updatePatientPassword(pat.id)"
-                                            class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
-                                        CHANGE PASSWORD
-                                    </button>
-                                    <button @click="deletePatient(pat.id)"
-                                            class="text-xs text-red-500 hover:text-red-400 font-bold">
-                                        DELETE
-                                    </button>
-                                </td>
-                            </tr>
-                        </template>
-                        <tr x-show="patients.length === 0">
-                            <td colspan="5" class="py-12 text-center text-slate-500 italic">No patients provisioned yet.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
-                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-                    <h2 class="text-xl font-bold">Authorized Personnel</h2>
-                    <button @click="refresh()" class="text-sm text-cyan-500 hover:underline">Refresh List</button>
-                </div>
-                <table class="w-full text-left">
-                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
-                        <tr>
-                            <th class="py-4 px-4">Doctor ID</th>
-                            <th class="py-4 px-4">Name</th>
-                            <th class="py-4 px-4">Status</th>
-                            <th class="py-4 px-4">Password</th>
-                            <th class="py-4 px-4 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="doc in doctors" :key="doc.id">
-                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
-                                <td class="py-4 px-4 font-mono text-cyan-400" x-text="doc.id"></td>
-                                <td class="py-4 px-4 font-bold" x-text="doc.name"></td>
-                                <td class="py-4 px-4">
-                                    <span x-text="doc.status" 
-                                        :class="doc.status === 'active' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'"
-                                        class="px-2 py-1 rounded text-xs uppercase font-bold">
-                                    </span>
-                                </td>
-                                <td class="py-4 px-4">
-                                    <span class="px-3 py-1 rounded-full bg-slate-800/70 border border-slate-700 font-mono text-xs tracking-wider text-slate-300">
-                                        HASHED ONLY
-                                    </span>
-                                </td>
-                                <td class="py-4 px-4 text-right">
-                                    <button x-show="doc.status !== 'active'" @click="issueCert(doc.id)" 
-                                            class="text-xs px-3 py-1 rounded font-bold mr-2 transition-all"
-                                            :class="!doc.csr_pem ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500'"
-                                            :title="!doc.csr_pem ? 'Doctor must submit CSR from app first' : 'Issue Certificate'">
-                                        ISSUE CA CERT
-                                    </button>
-                                    <button @click="recoverDoctorAccess(doc.id)"
-                                            class="text-xs text-amber-400 hover:text-amber-300 font-bold mr-2">
-                                        FORGOT PASSWORD
-                                    </button>
-                                    <button @click="refreshCert(doc.id)"
-                                            class="text-xs text-cyan-400 hover:text-cyan-300 font-bold mr-2">
-                                        REFRESH CERT
-                                    </button>
-                                    <button @click="revokeCert(doc.id)"
-                                            class="text-xs text-orange-400 hover:text-orange-300 font-bold mr-2">
-                                        REVOKE CERT
-                                    </button>
-                                    <button @click="deleteDoctor(doc.id)" 
-                                            class="text-xs text-red-500 hover:text-red-400 font-bold">
-                                        DELETE
-                                    </button>
-                                </td>
-                            </tr>
-                        </template>
-                        <tr x-show="doctors.length === 0">
-                            <td colspan="5" class="py-12 text-center text-slate-500 italic">No doctors provisioned yet.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </main>
+            </main>
+        </div>
     </div>
 
     <script>
         function adminApp() {
             return {
+                activeTab: 'patients',
                 stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, total_patients: 0, ca_algorithm: '...' },
                 doctors: [],
                 patients: [],
-                csrfToken: (document.querySelector('meta[name="csrf"]')?.getAttribute('content') || '').trim(),
-                refreshRetries: 0,
-                maxRefreshRetries: 2,
                 newDocName: '',
                 lastProvisioned: null,
                 newPatientName: '',
                 lastProvisionedPatient: null,
 
                 async init() {
-                    await this.ensureAdminSession();
                     await this.refresh();
-                },
-
-                async ensureAdminSession() {
-                    let check;
-                    try {
-                        check = await fetch('/api/admin/stats', {
-                            credentials: 'same-origin',
-                            headers: this.authHeaders(),
-                        });
-                    } catch (e) {
-                        alert("Network error checking admin session.");
-                        throw e;
-                    }
-                    if (check.ok) {
-                        return;
-                    }
-
-                    const tokenInput = prompt("Enter admin token:");
-                    if (!tokenInput || !tokenInput.trim()) {
-                        alert("Admin token is required.");
-                        throw new Error("Admin token missing");
-                    }
-
-                    let sessionResp;
-                    try {
-                        sessionResp = await fetch('/api/auth/admin/session', {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ token: tokenInput.trim() })
-                        });
-                    } catch (e) {
-                        alert("Network error creating admin session.");
-                        throw e;
-                    }
-                    if (!sessionResp.ok) {
-                        alert("Invalid admin token.");
-                        throw new Error("Admin session creation failed");
-                    }
-                    const sessionBody = await sessionResp.json().catch(() => ({}));
-                    if (sessionBody.csrf_token) {
-                        this.csrfToken = sessionBody.csrf_token;
-                    }                },
-
-                authHeaders(extra = {}) {
-                    const headers = { ...extra };
-                    if (this.csrfToken) {
-                        headers['X-CSRF-Token'] = this.csrfToken;
-                    }
-                    return headers;
                 },
 
                 async refresh() {
                     try {
                         const [statsRes, docsRes, patsRes] = await Promise.all([
-                            fetch('/api/admin/stats', { headers: this.authHeaders() }),
-                            fetch('/api/admin/doctors', { headers: this.authHeaders() }),
-                            fetch('/api/patient/admin/list', { headers: this.authHeaders() }),
+                            fetch('/api/admin/stats', { credentials: 'same-origin' }),
+                            fetch('/api/admin/doctors', { credentials: 'same-origin' }),
+                            fetch('/api/patient/admin/list', { credentials: 'same-origin' }),
                         ]);
                         if (statsRes.status === 401 || docsRes.status === 401) {
-                            if (this.refreshRetries >= this.maxRefreshRetries) {
-                                alert("Unable to refresh admin session. Please sign in again.");
-                                throw new Error("Admin session retry limit reached");
-                            }
-                            this.refreshRetries += 1;
-                            await this.ensureAdminSession();
-                            return this.refresh();
+                            window.location.href = '/admin';
+                            return;
                         }
-                        this.refreshRetries = 0;
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
                         this.patients = await patsRes.json();
@@ -290,16 +485,14 @@
                     }
                 },
 
+                // ── Doctor Management ──────────────────────────
                 async provisionDoctor() {
                     if (!this.newDocName) return;
-                    
                     try {
                         const resp = await fetch(`/api/admin/doctors/provision?name=${encodeURIComponent(this.newDocName)}`, { 
                             method: 'POST',
-                            headers: this.authHeaders(),
                             credentials: 'same-origin',
                         });
-                        
                         if (resp.ok) {
                             this.lastProvisioned = await resp.json();
                             this.newDocName = '';
@@ -316,13 +509,11 @@
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/issue-cert`, {
                             method: 'POST',
-                            headers: this.authHeaders(),
                             credentials: 'same-origin',
                         });
                         if (resp.ok) {
-                            await this.refresh(); // Immediate UI update
+                            await this.refresh();
                         } else if (resp.status === 400) {
-                            // Safely catch the exact error we wrote in the backend
                             const errorData = await resp.json();
                             alert("Cannot Issue Certificate:\n" + errorData.detail);
                         } else {
@@ -338,7 +529,6 @@
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/recover-access`, {
                             method: 'POST',
-                            headers: this.authHeaders(),
                             credentials: 'same-origin',
                         });
                         const body = await resp.json().catch(() => ({}));
@@ -359,7 +549,6 @@
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/refresh-cert`, {
                             method: 'POST',
-                            headers: this.authHeaders(),
                             credentials: 'same-origin',
                         });
                         const body = await resp.json().catch(() => ({}));
@@ -379,7 +568,6 @@
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/revoke-cert`, {
                             method: 'POST',
-                            headers: this.authHeaders(),
                             credentials: 'same-origin',
                         });
                         const body = await resp.json().catch(() => ({}));
@@ -398,7 +586,6 @@
                     if (confirm(`Permanently revoke access for ${id}? This will wipe their certificates and access rights.`)) {
                         const resp = await fetch(`/api/admin/doctors/${id}`, {
                             method: 'DELETE',
-                            headers: this.authHeaders(),
                             credentials: 'same-origin',
                         });
                         if (resp.ok) {
@@ -415,7 +602,7 @@
                     try {
                         const resp = await fetch(`/api/patient/admin/provision?name=${encodeURIComponent(this.newPatientName)}`, {
                             method: 'POST',
-                            headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         if (resp.ok) {
                             this.lastProvisionedPatient = await resp.json();
@@ -436,7 +623,8 @@
                     try {
                         const resp = await fetch(`/api/patient/admin/${patientId}/password`, {
                             method: 'PUT',
-                            headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
                             body: JSON.stringify({ password: newPassword.trim() })
                         });
                         if (!resp.ok) {
@@ -454,7 +642,7 @@
                     if (confirm(`Permanently delete patient ${id}?`)) {
                         const resp = await fetch(`/api/patient/admin/${id}`, {
                             method: 'DELETE',
-                            headers: this.authHeaders(),
+                            credentials: 'same-origin',
                         });
                         if (resp.ok) {
                             await this.refresh();

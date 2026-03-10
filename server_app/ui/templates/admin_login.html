@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VaultQ | Admin Login</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-950 text-slate-200 min-h-screen flex items-center justify-center font-sans">
+
+<div class="bg-gray-900 border border-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md">
+
+<!-- Logo -->
+<div class="flex justify-center mb-6">
+<div class="w-14 h-14 rounded-lg bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+<span class="font-bold text-white text-2xl tracking-tight">VQ</span>
+</div>
+</div>
+
+<h2 class="text-2xl font-bold text-center text-white mb-2">
+VaultQ Administration
+</h2>
+
+<p class="text-center text-slate-400 text-sm mb-8">
+Secure system control panel
+</p>
+
+<!-- Error Message -->
+<div id="errorBox" class="hidden bg-red-900/40 border border-red-700 text-red-300 text-sm rounded-md p-3 mb-5 text-center">
+Invalid username or password
+</div>
+
+<form id="loginForm" class="flex flex-col gap-4">
+
+<input
+type="text"
+name="username"
+placeholder="Admin Username"
+required
+class="bg-black border border-gray-700 p-3 rounded-lg text-center focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none"
+/>
+
+<input
+type="password"
+name="password"
+placeholder="Admin Password"
+required
+class="bg-black border border-gray-700 p-3 rounded-lg text-center focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none"
+/>
+
+<button
+id="loginButton"
+type="submit"
+class="bg-cyan-600 hover:bg-cyan-500 transition rounded-lg py-3 font-bold shadow-lg shadow-cyan-900/50"
+>
+Authenticate
+</button>
+
+</form>
+
+</div>
+
+<script>
+
+const form = document.getElementById("loginForm");
+const button = document.getElementById("loginButton");
+const errorBox = document.getElementById("errorBox");
+
+form.addEventListener("submit", async (e) => {
+
+e.preventDefault();
+
+errorBox.classList.add("hidden");
+
+button.innerHTML = "Authenticating...";
+button.disabled = true;
+
+const formData = new FormData(form);
+
+const response = await fetch("/api/admin/login", {
+method: "POST",
+body: formData
+});
+
+if(response.redirected){
+window.location.href = "/admin";
+return;
+}
+
+button.innerHTML = "Authenticate";
+button.disabled = false;
+
+errorBox.classList.remove("hidden");
+
+});
+
+</script>
+
+</body>
+</html>

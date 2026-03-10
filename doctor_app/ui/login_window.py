@@ -1,6 +1,7 @@
 # doctor_app/ui/login_window.py
 import os
 import sys
+import time
 import requests
 
 from PySide6.QtWidgets import (
@@ -23,6 +24,8 @@ from doctor_app.core.audit_logger import get_audit_logger
 AUTH_REQUEST_TIMEOUT_SECONDS = 10
 ONBOARD_REQUEST_TIMEOUT_SECONDS = 10
 CERT_POLL_TIMEOUT_SECONDS = 10
+CERT_POLL_INTERVAL_MS = 3000
+CERT_WAIT_TIMEOUT_SECONDS = int(os.getenv("VAULTQ_CERT_WAIT_TIMEOUT_SECONDS", "900"))
 
 
 class CustomTitleBar(QFrame):
@@ -229,6 +232,25 @@ class LoginWindow(QMainWindow):
         with open(os.path.join(keys_dir, "doctor_cert.pem"), "w", encoding="utf-8") as f:
             f.write(payload["pem_data"])
         return True
+
+    def _request_enroll_token(self, doc_id: str, password: str, verify_arg: str) -> tuple[str, str]:
+        resp = requests.post(
+            f"{self.pre_enroll_url}/api/pre-enroll/auth/verify",
+            json={"id": doc_id, "password": password},
+            verify=verify_arg,
+            timeout=AUTH_REQUEST_TIMEOUT_SECONDS,
+        )
+
+        if resp.status_code != 200:
+            self.audit.warning("Login verify rejected for doctor_id=%s status=%s", doc_id, resp.status_code)
+            raise Exception("Invalid credentials")
+
+        verify_body = resp.json()
+        enroll_token = (verify_body.get("enroll_token") or "").strip()
+        if not enroll_token:
+            raise Exception("Enrollment token missing from auth response.")
+        doctor_name = (verify_body.get("name") or "Doctor").strip() or "Doctor"
+        return enroll_token, doctor_name
 
     def _center_window(self):
         screen = self.screen().availableGeometry()
@@ -644,21 +666,7 @@ class LoginWindow(QMainWindow):
         try:
             self.audit.info("Login verify request sent for doctor_id=%s", doc_id)
             verify_arg = self._prepare_tls_material()
-
-            resp = requests.post(
-                f"{self.pre_enroll_url}/api/pre-enroll/auth/verify",
-                json={"id": doc_id, "password": password},
-                verify=verify_arg,
-                timeout=AUTH_REQUEST_TIMEOUT_SECONDS,
-            )
-
-            if resp.status_code != 200:
-                self.audit.warning("Login verify rejected for doctor_id=%s status=%s", doc_id, resp.status_code)
-                raise Exception("Invalid credentials")
-            verify_body = resp.json()
-            enroll_token = (verify_body.get("enroll_token") or "").strip()
-            if not enroll_token:
-                raise Exception("Enrollment token missing from auth response.")
+            enroll_token, doctor_name = self._request_enroll_token(doc_id, password, verify_arg)
             self.audit.info("Login verify accepted for doctor_id=%s", doc_id)
 
             try:
@@ -716,7 +724,7 @@ class LoginWindow(QMainWindow):
             tls_private_key = ec.generate_private_key(ec.SECP256R1())
             csr_pem = generate_doctor_csr_pem(
                 doctor_id=doc_id,
-                doctor_name=verify_body.get("name", "Doctor"),
+                doctor_name=doctor_name,
                 doctor_pqc_public_bytes=pqc_pub,
                 doctor_tls_private_key=tls_private_key,
             )
@@ -744,17 +752,26 @@ class LoginWindow(QMainWindow):
 
             self.status_label.setText("Waiting for Administrator Approval...")
             self.login_btn.setText("Enrolling...")
-            self._poll_for_certificate(doc_id, pqc_priv, enroll_token)
+            self._cert_wait_started_at = time.monotonic()
+            self._poll_for_certificate(doc_id, password, pqc_priv, enroll_token)
 
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as e:
+            self.audit.error("Login request timed out: %s", str(e))
             self._show_error_state("Request timed out. Please try again.")
         except requests.exceptions.RequestException as e:
+            self.audit.error("Login network error: %s", str(e))
             self._show_error_state(f"Network error: {str(e)}")
         except Exception as e:
+            self.audit.error("Login general error: %s", str(e))
             self._show_error_state(f"Error: {str(e)}")
 
-    def _poll_for_certificate(self, doc_id, pqc_priv, enroll_token):
+    def _poll_for_certificate(self, doc_id, password, pqc_priv, enroll_token):
         try:
+            if (time.monotonic() - getattr(self, "_cert_wait_started_at", time.monotonic())) > CERT_WAIT_TIMEOUT_SECONDS:
+                self.audit.warning("Certificate polling timed out for doctor_id=%s", doc_id)
+                self._show_error_state("Certificate approval timed out. Sign in again after admin issues cert.")
+                return
+
             verify_arg = self._prepare_tls_material()
             resp = requests.get(
                 f"{self.pre_enroll_url}/api/pre-enroll/auth/my-cert/{doc_id}",
@@ -769,7 +786,25 @@ class LoginWindow(QMainWindow):
                     f.write(resp.json()["pem_data"])
                 
                 self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, pqc_priv, enroll_token))
-            else:
-                QTimer.singleShot(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv, enroll_token))
-        except Exception:
-            QTimer.singleShot(3000, lambda: self._poll_for_certificate(doc_id, pqc_priv, enroll_token))
+                return
+
+            if resp.status_code == 401:
+                try:
+                    enroll_token, _ = self._request_enroll_token(doc_id, password, verify_arg)
+                    self.audit.info("Enrollment token refreshed during cert poll for doctor_id=%s", doc_id)
+                except Exception as exc:
+                    self.audit.warning("Enrollment token refresh failed for doctor_id=%s: %s", doc_id, str(exc))
+                    self._show_error_state("Enrollment token expired. Please sign in again.")
+                    return
+
+            if resp.status_code not in (200, 401):
+                self.audit.warning(
+                    "Certificate poll pending/error for doctor_id=%s status=%s",
+                    doc_id,
+                    resp.status_code,
+                )
+
+            QTimer.singleShot(CERT_POLL_INTERVAL_MS, lambda: self._poll_for_certificate(doc_id, password, pqc_priv, enroll_token))
+        except Exception as exc:
+            self.audit.warning("Certificate polling transient error for doctor_id=%s: %s", doc_id, str(exc))
+            QTimer.singleShot(CERT_POLL_INTERVAL_MS, lambda: self._poll_for_certificate(doc_id, password, pqc_priv, enroll_token))

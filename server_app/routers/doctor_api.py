@@ -69,6 +69,8 @@ def _safe_path_component(value: str) -> str:
 
 
 def _print_crypto_data(label: str, data: bytes):
+    if os.getenv("VAULTQ_DEBUG_CRYPTO", "0") != "1":
+        return
     full_dump = os.getenv("VAULTQ_DEBUG_FULL_DUMPS", "0") == "1"
     if full_dump:
         print(f"[CRYPTO DEBUG] {label} (len={len(data)} bytes): {base64.b64encode(data).decode()}")

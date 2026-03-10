@@ -8,6 +8,7 @@ export default defineConfig({
     outDir: 'dist',
   },
   server: {
+    open: '/patient/',
     proxy: {
       '/api': {
         target: 'https://127.0.0.1:8081',
