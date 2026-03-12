@@ -52,7 +52,7 @@ def parse_int_env(var_name: str, default: int) -> int:
 
 # Create the secure storage directory
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "storage", "vault")
-os.makedirs(STORAGE_DIR, mode=0o700, exist_ok=True)
+os.makedirs(STORAGE_DIR, exist_ok=True)
 MAX_CLOCK_SKEW_SECONDS = 300
 REPLAY_CACHE_TTL_SECONDS = 900
 STORED_ENVELOPE_VERSION: Literal["v2"] = "v2"
@@ -348,13 +348,10 @@ def receive_record(envelope: SecureEnvelope):
     )
 
     # --- 4. STORE UNDER vault/<patient_id>/ ---
-    patient_dir = os.path.join(STORAGE_DIR, _safe_path_component(str(patient_id)))
-    os.makedirs(patient_dir, mode=0o700, exist_ok=True)
     record_id = f"rec_{int(time.time())}_{_safe_path_component(base64.b64encode(os.urandom(6)).decode())}"
-    file_path = os.path.join(patient_dir, f"{record_id}.json")
-
-    with open(file_path, "w") as f:
-        json.dump(stored_envelope.model_dump(), f, indent=4)
+    storage_path = state.vault_storage.save_record(
+        str(patient_id), record_id, stored_envelope.model_dump()
+    )
 
     integrity_event_path = append_integrity_event(
         {
@@ -379,15 +376,15 @@ def receive_record(envelope: SecureEnvelope):
         
     audit.info(
         "Upload stored: doctor_id=%s patient_id=%s record_id=%s master_kid=%s path=%s integrity_log=%s",
-        doctor_id, patient_id, record_id, state.master_kid, file_path, integrity_event_path,
+        doctor_id, patient_id, record_id, state.master_kid, storage_path, integrity_event_path,
     )
-    
+
     return {
         "status": "Verified, re-encrypted with master key, and secured",
         "record_id": record_id,
         "patient_id": patient_id,
         "master_kid": state.master_kid,
-        "saved_to": file_path
+        "saved_to": storage_path
     }
 
 

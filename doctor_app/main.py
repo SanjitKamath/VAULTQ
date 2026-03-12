@@ -1,3 +1,4 @@
+import os
 import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
@@ -13,7 +14,8 @@ def main():
     app = QApplication(sys.argv)
 
     # Set global app icon (taskbar, Alt+Tab, window icon)
-    app.setWindowIcon(QIcon("doctor_app/assets/icon.ico"))
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
+    app.setWindowIcon(QIcon(icon_path))
 
     # 2. Instantiate and show the login window
     login = LoginWindow()

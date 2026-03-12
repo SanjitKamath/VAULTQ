@@ -6,3 +6,4 @@ python-multipart>=0.0.6
 pathlib>=1.0.0
 passlib[bcrypt]>=1.7.0
 Jinja2
+google-cloud-storage>=2.10.0

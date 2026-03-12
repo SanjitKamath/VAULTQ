@@ -1,6 +1,7 @@
 import datetime
 import ipaddress
 import os
+import sys
 from pathlib import Path
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ObjectIdentifier
@@ -12,17 +13,22 @@ from security_suite.crypto.primitive_dsa import DSAManager
 OID_ML_DSA_65 = ObjectIdentifier("1.3.6.1.4.1.99999.1.1")
 
 
+_IS_WINDOWS = sys.platform.startswith("win")
+
+
 def _write_secure_bytes(path: Path, data: bytes) -> None:
     flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC
-    fd = os.open(path, flags, 0o600)
+    mode = 0o600 if not _IS_WINDOWS else 0o666
+    fd = os.open(path, flags, mode)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
     finally:
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        if not _IS_WINDOWS:
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
 
 
 def _cert_dir() -> Path:
@@ -35,11 +41,12 @@ def bootstrap_hospital_root_ca() -> x509.Certificate:
     Persists the ML-DSA-65 keypair alongside the cert for cross-restart consistency.
     """
     cert_dir = _cert_dir()
-    cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        os.chmod(cert_dir, 0o700)
-    except OSError:
-        pass
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    if not _IS_WINDOWS:
+        try:
+            os.chmod(cert_dir, 0o700)
+        except OSError:
+            pass
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     container_key_path = cert_dir / "hospital_root_ca.key"
     pqc_private_key_path = cert_dir / "hospital_root_ca_ml_dsa.key"
@@ -143,7 +150,7 @@ def ensure_server_tls_artifacts() -> bool:
     Generates a new server leaf cert signed by hospital_root_ca.key if missing.
     """
     cert_dir = _cert_dir()
-    cert_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cert_dir.mkdir(parents=True, exist_ok=True)
 
     root_cert_path = cert_dir / "hospital_root_ca.pem"
     root_key_path = cert_dir / "hospital_root_ca.key"

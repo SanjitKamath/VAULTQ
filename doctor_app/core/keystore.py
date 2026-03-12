@@ -22,9 +22,11 @@ def _print_crypto_data(label: str, data: bytes):
 
 
 class LocalKeyVault:
-    def __init__(self, storage_dir="doctor_app/storage/keystore"):
+    def __init__(self, storage_dir=None):
+        if storage_dir is None:
+            storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage", "keystore")
         self.storage_dir = storage_dir
-        os.makedirs(self.storage_dir, mode=0o700, exist_ok=True)
+        os.makedirs(self.storage_dir, exist_ok=True)
         self.audit = get_audit_logger()
         self.audit.info("LocalKeyVault initialized at %s", self.storage_dir)
 

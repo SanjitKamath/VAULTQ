@@ -1,4 +1,3 @@
-import os
 import json
 import base64
 import time
@@ -18,15 +17,10 @@ from security_suite.crypto import DSAManager
 router = APIRouter(prefix="/api/patient", tags=["Patient Portal"])
 audit = get_audit_logger()
 
-VAULT_DIR = os.path.join(os.path.dirname(__file__), "..", "storage", "vault")
-
 # Simple in-memory session store: token -> { patient_id, expires_at }
 _patient_sessions: dict[str, dict] = {}
 SESSION_TTL = 3600  # 1 hour
 
-
-def _safe_path_component(value: str) -> str:
-    return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(value))
 
 
 def _create_session(patient_id: str) -> str:
@@ -156,20 +150,12 @@ def list_patient_records(x_patient_token: str = Header(default="")):
     patient_id = _require_patient_session(x_patient_token)
     audit.info("Patient record list requested for patient_id=%s", patient_id)
 
-    patient_dir = os.path.join(VAULT_DIR, _safe_path_component(patient_id))
-    if not os.path.isdir(patient_dir):
-        return []
-
     records = []
-    for fname in sorted(os.listdir(patient_dir)):
-        if not fname.endswith(".json"):
-            continue
-        fpath = os.path.join(patient_dir, fname)
+    for rid in state.vault_storage.list_records(patient_id):
         try:
-            with open(fpath, "r") as f:
-                envelope = json.load(f)
+            envelope = state.vault_storage.load_record(patient_id, rid)
             records.append({
-                "record_id": fname.replace(".json", ""),
+                "record_id": rid,
                 "timestamp": envelope.get("timestamp"),
                 "patient_id": envelope.get("patient_id"),
                 "master_kid": envelope.get("master_kid"),
@@ -195,14 +181,10 @@ def get_patient_record(record_id: str, x_patient_token: str = Header(default="")
     patient_id = _require_patient_session(x_patient_token)
     audit.info("Patient record retrieval for patient_id=%s record_id=%s", patient_id, record_id)
 
-    patient_dir = os.path.join(VAULT_DIR, _safe_path_component(patient_id))
-    record_path = os.path.join(patient_dir, f"{record_id}.json")
-
-    if not os.path.exists(record_path):
+    try:
+        stored_envelope = state.vault_storage.load_record(patient_id, record_id)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Record not found.")
-
-    with open(record_path, "r") as f:
-        stored_envelope = json.load(f)
 
     # ── Step 1: Verify master_kid matches server's current master key ──
     if stored_envelope.get("master_kid") != state.master_kid:

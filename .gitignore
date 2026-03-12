@@ -3,8 +3,17 @@ __pycache__/
 .env
 .venv/
 .vscode/
+.idea/
 storage/
 *.log
+
+# OS junk files
+.DS_Store
+Thumbs.db
+
+# GCP service account keys
+vaultq-sa-key.json
+*-sa-key.json
 
 # React patient app
 patient_app/node_modules/
@@ -12,6 +21,9 @@ patient_app/dist/
 
 # Security suite logs
 security_suite/logs/
+
+# Doctor app logs
+doctor_app/logs/
 
 # Test artifacts
 test_patient_viewer.py

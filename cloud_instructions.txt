@@ -1,0 +1,261 @@
+================================================================================
+  VAULTQ — Google Cloud Storage Integration Guide
+================================================================================
+
+This guide walks you through everything from creating a Google Cloud account
+to verifying that VaultQ reads and writes encrypted patient records to GCS.
+
+--------------------------------------------------------------------------------
+STEP 1: Create a Google Cloud Account
+--------------------------------------------------------------------------------
+
+1. Go to https://cloud.google.com/ and click "Get started for free" (or
+   "Start free").
+2. Sign in with your Google account (or create one).
+3. You will be asked for a credit card — Google gives $300 in free credits
+   for 90 days and will NOT auto-charge after the trial ends. You must
+   manually upgrade to a paid account for charges to apply.
+4. Accept the terms of service to activate your account.
+
+--------------------------------------------------------------------------------
+STEP 2: Install the Google Cloud CLI (gcloud)
+--------------------------------------------------------------------------------
+
+macOS (Homebrew):
+    brew install --cask google-cloud-sdk
+
+macOS (manual):
+    Download from https://cloud.google.com/sdk/docs/install-sdk#mac
+    Extract the archive and run:
+        ./google-cloud-sdk/install.sh
+
+After install, initialize and log in:
+    gcloud init
+    - It will open a browser for you to authenticate with your Google account.
+    - Select or create a project when prompted (e.g. "vaultq-project").
+    - Pick a default region (e.g. us-central1). This does not lock you in.
+
+Verify it works:
+    gcloud auth list
+    gcloud config get-value project
+
+--------------------------------------------------------------------------------
+STEP 3: Create a Google Cloud Project (if you didn't during gcloud init)
+--------------------------------------------------------------------------------
+
+    gcloud projects create vaultq-project --name="VaultQ"
+    gcloud config set project vaultq-project
+
+Enable billing for the project (required even on the free tier):
+    - Go to https://console.cloud.google.com/billing
+    - Link your project to the billing account that was created during signup.
+
+--------------------------------------------------------------------------------
+STEP 4: Create a GCS Bucket
+--------------------------------------------------------------------------------
+
+Pick a globally unique bucket name (bucket names are global across all of
+Google Cloud, so "vaultq-bucket" may already be taken — add your own prefix).
+
+    gcloud storage buckets create gs://YOUR-VAULTQ-BUCKET \
+      --location=us-central1 \
+      --uniform-bucket-level-access
+
+Replace YOUR-VAULTQ-BUCKET with your chosen name throughout this guide.
+
+Recommended settings:
+
+  Enable versioning (protects against accidental overwrites):
+    gcloud storage buckets update gs://YOUR-VAULTQ-BUCKET --versioning
+
+  The bucket is private by default — do NOT enable public access.
+
+Verify:
+    gcloud storage buckets describe gs://YOUR-VAULTQ-BUCKET
+
+--------------------------------------------------------------------------------
+STEP 5: Create a Service Account and Download a Key
+--------------------------------------------------------------------------------
+
+A service account is a non-human identity that VaultQ will use to
+authenticate with GCS. You create it, grant it permissions on your bucket,
+and download a JSON key file that the server will use.
+
+1. Create the service account:
+    gcloud iam service-accounts create vaultq-server \
+      --display-name="VaultQ Server Storage"
+
+2. Grant it read/write access to your bucket only:
+    gcloud storage buckets add-iam-policy-binding gs://YOUR-VAULTQ-BUCKET \
+      --member="serviceAccount:vaultq-server@YOUR-PROJECT-ID.iam.gserviceaccount.com" \
+      --role="roles/storage.objectUser"
+
+   Replace YOUR-PROJECT-ID with your actual project ID (e.g. vaultq-project).
+   The role "roles/storage.objectUser" grants create, get, list, and delete
+   on objects — the minimum the SDK needs.
+
+3. Download the key file:
+    gcloud iam service-accounts keys create ./vaultq-sa-key.json \
+      --iam-account=vaultq-server@YOUR-PROJECT-ID.iam.gserviceaccount.com
+
+   This creates a file called vaultq-sa-key.json in your current directory.
+
+4. Secure the key file:
+    chmod 600 vaultq-sa-key.json
+
+   IMPORTANT: Never commit this file to git. It is already covered by
+   common .gitignore patterns for *.json keys, but double-check. You can
+   add this line to your .gitignore if needed:
+       vaultq-sa-key.json
+
+--------------------------------------------------------------------------------
+STEP 6: Install the Python Dependency
+--------------------------------------------------------------------------------
+
+From the project root:
+    pip install -r server_app/requirements_server.txt
+
+This installs google-cloud-storage and its dependencies (google-auth,
+google-api-core, etc.).
+
+--------------------------------------------------------------------------------
+STEP 7: Configure VaultQ Environment Variables
+--------------------------------------------------------------------------------
+
+In your .env file (or export them in your shell), set:
+
+    VAULTQ_STORAGE_BACKEND=gcs
+    VAULTQ_GCS_BUCKET=YOUR-VAULTQ-BUCKET
+    GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/vaultq-sa-key.json
+
+GOOGLE_APPLICATION_CREDENTIALS is a standard env var recognized by all
+Google Cloud client libraries. It tells the SDK where to find the service
+account key.
+
+To switch back to local file storage at any time:
+    VAULTQ_STORAGE_BACKEND=local
+    (or simply remove/comment out the variable — "local" is the default)
+
+--------------------------------------------------------------------------------
+STEP 8: Start the Server and Verify
+--------------------------------------------------------------------------------
+
+1. Start the VaultQ server as usual.
+
+2. Check the startup logs for these lines:
+       ServerState init: vault storage backend=gcs
+       GCSVaultStorage initialized: bucket=YOUR-VAULTQ-BUCKET
+
+   If the credentials or bucket name are wrong, the server will fail to
+   start with a clear error message.
+
+3. Upload a record from the doctor app.
+   - The API response should include:
+       "saved_to": "gs://YOUR-VAULTQ-BUCKET/vault/<patient_id>/rec_....json"
+
+4. Verify the object landed in GCS:
+       gcloud storage ls gs://YOUR-VAULTQ-BUCKET/vault/
+       gcloud storage cat gs://YOUR-VAULTQ-BUCKET/vault/<patient_id>/rec_*.json
+
+5. Log in as the patient and verify:
+   - Record listing works (GET /api/patient/records)
+   - Record retrieval and decryption works (GET /api/patient/records/<id>)
+
+6. Check audit logs — the path= field should now show gs:// URIs.
+
+--------------------------------------------------------------------------------
+IMPORTANT NOTES
+--------------------------------------------------------------------------------
+
+Existing local records:
+    Any records already stored under server_app/storage/vault/ will NOT be
+    visible when running in GCS mode. If you are migrating an existing
+    deployment, you would need to upload them to the bucket manually:
+        gcloud storage cp -r server_app/storage/vault/* gs://YOUR-VAULTQ-BUCKET/vault/
+
+Network latency:
+    GCS calls add ~50-200ms per request compared to local disk. For most
+    use cases this is fine, but if you have patients with many records,
+    listing can be slower since each record's metadata is fetched
+    individually.
+
+What stays local (never goes to GCS):
+    - master_key.json — decrypts everything; must never leave the server
+    - hospital_root_ca.key / hospital_root_ca_ml_dsa.key — CA private keys
+    - server.key / server.crt — TLS identity
+    - hospital_vault.json — metadata database (doctors, patients, certs)
+    - Audit logs — remain local (Python logging + append-only JSONL)
+
+Cost:
+    With the $300 free credit, GCS usage for VaultQ will be essentially
+    free for a long time. After the trial, GCS Standard storage costs
+    ~$0.02/GB/month. Operations cost fractions of a cent per 1000 calls.
+
+Rollback:
+    Set VAULTQ_STORAGE_BACKEND=local (or remove it) and restart. The
+    server will go back to reading/writing from the local filesystem.
+
+================================================================================
+
+
+My personal notes:
+
+gcloud projects add-iam-policy-binding vaultq-project "--member=user:johnnyenglish.mta@gmail.com" "--role=roles/viewer"
+gcloud projects add-iam-policy-binding vaultq-project "--member=user:mjiyad119@gmail.com" "--role=roles/viewer"
+gcloud projects add-iam-policy-binding vaultq-project "--member=user:sanjitkamathu@gmail.com" "--role=roles/viewer"
+
+gcloud storage buckets add-iam-policy-binding gs://vaultq-majorproject-bucket "--member=user:johnnyenglish.mta@gmail.com" "--role=roles/storage.admin"
+gcloud storage buckets add-iam-policy-binding gs://vaultq-majorproject-bucket "--member=user:mjiyad119@gmail.com" "--role=roles/storage.admin"
+gcloud storage buckets add-iam-policy-binding gs://vaultq-majorproject-bucket "--member=user:sanjitkamathu@gmail.com" "--role=roles/storage.admin"
+
+
+
+-Login to portals for MAC:
+
+for admin:
+
+  export VAULTQ_ADMIN_TOKEN=<your-admin-token-from-.env>
+  export VAULTQ_ALLOW_INSECURE_DEV=1
+  export VAULTQ_SERVER_URL=https://127.0.0.1:8080
+  export VAULTQ_STORAGE_BACKEND=gcs
+  export VAULTQ_GCS_BUCKET=vaultq-majorproject-bucket
+  export GOOGLE_APPLICATION_CREDENTIALS=/Users/abhinav.varma/Documents/GitHub/VAULTQ/vaultq-sa-key.json
+  .venv/bin/python -m server_app.main
+
+(https://127.0.0.1:8081/admin)
+
+
+for patient:
+
+  cd patient_app && npm run dev
+
+
+for doctor:
+
+  cd /Users/abhinav.varma/Documents/GitHub/VAULTQ && VAULTQ_SERVER_URL=https://localhost:8080
+  VAULTQ_PRE_ENROLL_URL=https://localhost:8081 .venv/bin/python -m doctor_app.main
+
+
+-Login to portals for windows:
+
+Terminal 1 (Server):                                                                                                         
+  $env:VAULTQ_ADMIN_TOKEN="<your-admin-token-from-.env>"                                   
+  $env:VAULTQ_ALLOW_INSECURE_DEV="1"                                                                                           
+  $env:VAULTQ_SERVER_URL="https://127.0.0.1:8080"                                                                              
+  $env:VAULTQ_STORAGE_BACKEND="gcs"                                                                                            
+  $env:VAULTQ_GCS_BUCKET="vaultq-majorproject-bucket"                                                                          
+  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\vaultq-sa-key.json"                                                          
+  .venv\Scripts\python -m server_app.main
+
+  Terminal 2 (Doctor app):
+  $env:VAULTQ_SERVER_URL="https://localhost:8080"
+  $env:VAULTQ_PRE_ENROLL_URL="https://localhost:8081"
+  .venv\Scripts\python -m doctor_app.main
+
+  Terminal 3 (Patient portal):
+  cd patient_app
+  npm run dev
+
+  URLs:
+  - Admin: https://127.0.0.1:8081/admin
+  - Patient: http://localhost:5173/patient/
