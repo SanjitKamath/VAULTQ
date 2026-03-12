@@ -38,7 +38,7 @@ cd ..
 Copy `.env.sample` to `.env` and ensure these values are set:
 
 ```bash
-VAULTQ_ADMIN_TOKEN=2ee154a7b907f959d2aa03f2e74ce17883eef3b10a6117dff745cf8fe84d70fb
+VAULTQ_ADMIN_TOKEN=<your-admin-token-from-.env>
 VAULTQ_SERVER_URL=https://127.0.0.1:8080
 VAULTQ_PRE_ENROLL_URL=https://127.0.0.1:8081
 VAULTQ_ADMIN_SESSION_TTL_SECONDS=3600

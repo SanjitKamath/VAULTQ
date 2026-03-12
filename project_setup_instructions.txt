@@ -196,7 +196,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1                                                                               
 
 
->>   $env:VAULTQ_ADMIN_TOKEN="2ee154a7b907f959d2aa03f2e74ce17883eef3b10a6117dff745cf8fe84d70fb"
+>>   $env:VAULTQ_ADMIN_TOKEN="<your-admin-token-from-.env>"
 >>   $env:VAULTQ_STORAGE_BACKEND="gcs"
 >>   $env:VAULTQ_GCS_BUCKET="vaultq-majorproject-bucket"
 >>   $env:GOOGLE_APPLICATION_CREDENTIALS="C:\Users\Abhinav\Documents\GitHub\VAULTQ\vault-sa-key.json"

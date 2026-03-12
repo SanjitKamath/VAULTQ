@@ -214,7 +214,7 @@ gcloud storage buckets add-iam-policy-binding gs://vaultq-majorproject-bucket "-
 
 for admin:
 
-  export VAULTQ_ADMIN_TOKEN=2ee154a7b907f959d2aa03f2e74ce17883eef3b10a6117dff745cf8fe84d70fb
+  export VAULTQ_ADMIN_TOKEN=<your-admin-token-from-.env>
   export VAULTQ_ALLOW_INSECURE_DEV=1
   export VAULTQ_SERVER_URL=https://127.0.0.1:8080
   export VAULTQ_STORAGE_BACKEND=gcs
@@ -239,7 +239,7 @@ for doctor:
 -Login to portals for windows:
 
 Terminal 1 (Server):                                                                                                         
-  $env:VAULTQ_ADMIN_TOKEN="2ee154a7b907f959d2aa03f2e74ce17883eef3b10a6117dff745cf8fe84d70fb"                                   
+  $env:VAULTQ_ADMIN_TOKEN="<your-admin-token-from-.env>"                                   
   $env:VAULTQ_ALLOW_INSECURE_DEV="1"                                                                                           
   $env:VAULTQ_SERVER_URL="https://127.0.0.1:8080"                                                                              
   $env:VAULTQ_STORAGE_BACKEND="gcs"                                                                                            
