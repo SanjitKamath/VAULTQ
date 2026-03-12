@@ -236,3 +236,26 @@ for doctor:
   VAULTQ_PRE_ENROLL_URL=https://localhost:8081 .venv/bin/python -m doctor_app.main
 
 
+-Login to portals for windows:
+
+Terminal 1 (Server):                                                                                                         
+  $env:VAULTQ_ADMIN_TOKEN="2ee154a7b907f959d2aa03f2e74ce17883eef3b10a6117dff745cf8fe84d70fb"                                   
+  $env:VAULTQ_ALLOW_INSECURE_DEV="1"                                                                                           
+  $env:VAULTQ_SERVER_URL="https://127.0.0.1:8080"                                                                              
+  $env:VAULTQ_STORAGE_BACKEND="gcs"                                                                                            
+  $env:VAULTQ_GCS_BUCKET="vaultq-majorproject-bucket"                                                                          
+  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\vaultq-sa-key.json"                                                          
+  .venv\Scripts\python -m server_app.main
+
+  Terminal 2 (Doctor app):
+  $env:VAULTQ_SERVER_URL="https://localhost:8080"
+  $env:VAULTQ_PRE_ENROLL_URL="https://localhost:8081"
+  .venv\Scripts\python -m doctor_app.main
+
+  Terminal 3 (Patient portal):
+  cd patient_app
+  npm run dev
+
+  URLs:
+  - Admin: https://127.0.0.1:8081/admin
+  - Patient: http://localhost:5173/patient/
