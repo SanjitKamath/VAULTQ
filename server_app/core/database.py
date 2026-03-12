@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 import tempfile
 import threading
@@ -9,6 +10,8 @@ import secrets
 from pathlib import Path
 from .audit_logger import get_audit_logger
 from .auth_utils import hash_password, SCHEME_PREFIX
+
+_IS_WINDOWS = sys.platform.startswith("win")
 
 # --- Pydantic Models for API Validation ---
 
@@ -69,18 +72,23 @@ class VaultQDatabase:
 
     def save_db(self):
         self.db_file.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.db_file.parent, 0o700)
+        if not _IS_WINDOWS:
+            try:
+                os.chmod(self.db_file.parent, 0o700)
+            except OSError:
+                pass
         fd, temp_path = tempfile.mkstemp(
             prefix=f".{self.db_file.name}.",
             suffix=".tmp",
             dir=str(self.db_file.parent),
         )
         try:
-            try:
-                os.chmod(temp_path, 0o600)
-            except Exception:
-                os.close(fd)
-                raise
+            if not _IS_WINDOWS:
+                try:
+                    os.chmod(temp_path, 0o600)
+                except Exception:
+                    os.close(fd)
+                    raise
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(
                     {
@@ -95,7 +103,11 @@ class VaultQDatabase:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temp_path, self.db_file)
-            os.chmod(self.db_file, 0o600)
+            if not _IS_WINDOWS:
+                try:
+                    os.chmod(self.db_file, 0o600)
+                except OSError:
+                    pass
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)

@@ -63,8 +63,8 @@ class SecurityAgent:
         self.is_connected = False
         self.enroll_token = (enroll_token or "").strip()
         
-        keys_dir = Path(getattr(config, "keys_dir", "doctor_app/storage/keys"))
-        keys_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        keys_dir = Path(getattr(config, "keys_dir", str(Path(__file__).resolve().parents[1] / "storage" / "keys")))
+        keys_dir.mkdir(parents=True, exist_ok=True)
         self.cert_path = str(keys_dir / "doctor_cert.pem")
         self.key_path = str(keys_dir / "doctor_container.key")
         self.ca_cert_path = config.ca_cert_path
@@ -135,7 +135,7 @@ class SecurityAgent:
         if body.get("status") != "issued" or not body.get("pem_data"):
             return False
 
-        Path(self.cert_path).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        Path(self.cert_path).parent.mkdir(parents=True, exist_ok=True)
         with open(self.cert_path, "w", encoding="utf-8") as f:
             f.write(body["pem_data"])
         return True

@@ -181,8 +181,8 @@ class LoginWindow(QMainWindow):
         return config.ca_cert_path
 
     def _keys_dir(self):
-        keys_dir = config.keys_dir if getattr(config, "keys_dir", None) else "doctor_app/storage/keys"
-        os.makedirs(keys_dir, mode=0o700, exist_ok=True)
+        keys_dir = config.keys_dir if getattr(config, "keys_dir", None) else str(Path(__file__).resolve().parents[1] / "storage" / "keys")
+        os.makedirs(keys_dir, exist_ok=True)
         return keys_dir
 
     def _clear_local_tls_assets(self):

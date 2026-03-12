@@ -1,6 +1,9 @@
 import json
 import os
+import sys
 from pathlib import Path
+
+_IS_WINDOWS = sys.platform.startswith("win")
 from typing import Dict, Any
 
 
@@ -13,12 +16,12 @@ def append_integrity_event(event: Dict[str, Any]) -> str:
     log_dir = storage_dir / "logs"
     storage_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
-    for path in (storage_dir, log_dir):
-        try:
-            os.chmod(path, 0o700)
-        except OSError:
-            # On some platforms/filesystems chmod may not fully apply.
-            pass
+    if not _IS_WINDOWS:
+        for path in (storage_dir, log_dir):
+            try:
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
     file_path = log_dir / "integrity_events.jsonl"
 
     with open(file_path, "a", encoding="utf-8") as f:

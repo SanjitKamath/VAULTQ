@@ -31,7 +31,7 @@ class LocalVaultStorage(VaultStorageBackend):
                 os.path.dirname(__file__), "..", "storage", "vault"
             )
         self.base_dir = os.path.abspath(base_dir)
-        os.makedirs(self.base_dir, mode=0o700, exist_ok=True)
+        os.makedirs(self.base_dir, exist_ok=True)
         logger.info("LocalVaultStorage initialized: base_dir=%s", self.base_dir)
 
     def _patient_dir(self, patient_id: str) -> str:
@@ -44,7 +44,7 @@ class LocalVaultStorage(VaultStorageBackend):
 
     def save_record(self, patient_id: str, record_id: str, data: dict) -> str:
         patient_dir = self._patient_dir(patient_id)
-        os.makedirs(patient_dir, mode=0o700, exist_ok=True)
+        os.makedirs(patient_dir, exist_ok=True)
         file_path = os.path.join(patient_dir, f"{record_id}.json")
         with open(file_path, "w") as f:
             json.dump(data, f, indent=4)

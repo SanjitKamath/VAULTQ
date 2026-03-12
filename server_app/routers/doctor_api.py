@@ -52,7 +52,7 @@ def parse_int_env(var_name: str, default: int) -> int:
 
 # Create the secure storage directory
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "storage", "vault")
-os.makedirs(STORAGE_DIR, mode=0o700, exist_ok=True)
+os.makedirs(STORAGE_DIR, exist_ok=True)
 MAX_CLOCK_SKEW_SECONDS = 300
 REPLAY_CACHE_TTL_SECONDS = 900
 STORED_ENVELOPE_VERSION: Literal["v2"] = "v2"
