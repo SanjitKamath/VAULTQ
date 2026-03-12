@@ -174,3 +174,50 @@ UX-only changes:
 ============================================================
 End of VaultQ Developer Setup Guide
 ============================================================
+
+
+-----------------------
+Notes for windows setup:
+
+vault-sa-key.json (create a file and use its path in the google app credentials while running admin) :
+
+-----contact abhinav for the json file, will send it then
+
+Admin:
+
+1) Get the vault-sa-key.json 
+2) To run - 
+
+python -m venv .venv                                                                                                         
+  .\.venv\Scripts\Activate.ps1                                                                                               
+  pip install -r requirements.txt 
+
+
+.\.venv\Scripts\Activate.ps1                                                                               
+
+
+>>   $env:VAULTQ_ADMIN_TOKEN="2ee154a7b907f959d2aa03f2e74ce17883eef3b10a6117dff745cf8fe84d70fb"
+>>   $env:VAULTQ_STORAGE_BACKEND="gcs"
+>>   $env:VAULTQ_GCS_BUCKET="vaultq-majorproject-bucket"
+>>   $env:GOOGLE_APPLICATION_CREDENTIALS="C:\Users\Abhinav\Documents\GitHub\VAULTQ\vault-sa-key.json"
+>>   .venv\Scripts\python -m server_app.main
+
+(https://localhost:8081/admin   - it should run here)
+
+  ( //add your own path for vaultq-sa-key.json, wherever u store it, preferably under vaultq folder itself)
+
+
+Patient:
+
+1) cd patient_app
+2) npm install 
+3) npm run Dev
+
+(it should run here  : http://localhost:5173/patient/)
+
+
+Doctor:
+
+ensure the terminal has the venv setup with all the requirements installed
+
+python -m doctor_app.main
