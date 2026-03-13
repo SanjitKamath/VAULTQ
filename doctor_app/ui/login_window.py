@@ -4,6 +4,8 @@ import sys
 import time
 import requests
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QMessageBox, QInputDialog, QGraphicsDropShadowEffect, QFrame
