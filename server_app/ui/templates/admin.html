@@ -231,9 +231,15 @@
             </div>
             <div class="flex items-center gap-4 text-sm">
                 <span class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-md border border-slate-800 shadow-inner">
-                    <div class="w-2 h-2 rounded-full" :class="stats.ca_status === 'Online' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'"></div> 
+                    <div class="w-2 h-2 rounded-full" :class="stats.ca_status === 'Online' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'"></div>
                     <span class="text-slate-400">CA Status:</span> <span class="font-bold text-slate-200" x-text="stats.ca_status"></span>
                 </span>
+                <button @click="logout()"
+                        style="color:#f87171; border:1px solid #7f1d1d; padding:4px 12px; border-radius:4px; font-size:12px; font-weight:700; transition:all 0.2s;"
+                        onmouseover="this.style.color='#fca5a5'; this.style.borderColor='#b91c1c'"
+                        onmouseout="this.style.color='#f87171'; this.style.borderColor='#7f1d1d'">
+                    LOGOUT
+                </button>
             </div>
         </header>
 
@@ -650,6 +656,18 @@
                             alert("Failed to delete patient.");
                         }
                     }
+                },
+
+                async logout() {
+                    try {
+                        await fetch('/api/admin/logout', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                        });
+                    } catch (e) {
+                        // Redirect even if the request fails
+                    }
+                    window.location.href = '/admin';
                 }
             }
         }

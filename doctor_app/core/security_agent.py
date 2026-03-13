@@ -334,4 +334,5 @@ class SecurityAgent:
 
     def shutdown(self):
         """Graceful shutdown method (called when UI closes)."""
+        self.is_connected = False
         self.log("Security agent shutting down...", "INFO")

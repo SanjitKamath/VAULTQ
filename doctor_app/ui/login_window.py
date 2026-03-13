@@ -415,7 +415,7 @@ class LoginWindow(QMainWindow):
                     border-radius: 16px; 
                 }}
                 QLabel#AppTitle {{ color: #FFFFFF; font-family: {font_family}; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }}
-                QLabel#Subtitle {{ color: #A1A1AA; font-size: 13px; margin-top: -4px; font-family: {font_family}; }}
+                QLabel#Subtitle {{ color: #A1A1AA; font-size: 13px; margin-top: 2px; font-family: {font_family}; }}
                 
                 /* Fixed Font Colors for Dark Mode */
                 QLineEdit {{ 
@@ -494,7 +494,7 @@ class LoginWindow(QMainWindow):
                     border-radius: 16px; 
                 }}
                 QLabel#AppTitle {{ color: #111827; font-family: {font_family}; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }}
-                QLabel#Subtitle {{ color: #6B7280; font-size: 13px; margin-top: -4px; font-family: {font_family}; }}
+                QLabel#Subtitle {{ color: #6B7280; font-size: 13px; margin-top: 2px; font-family: {font_family}; }}
                 
                 QLineEdit {{ 
                     min-height: 42px;
@@ -623,6 +623,7 @@ class LoginWindow(QMainWindow):
             private_key=private_key,
             server_url=self.server_url,
             enroll_token=enroll_token,
+            login_window=self,
         )
         self._main_app.setWindowOpacity(0.0)
         self._main_app.show()
@@ -632,6 +633,25 @@ class LoginWindow(QMainWindow):
         self.main_fade.setEndValue(1.0)
         self.main_fade.setEasingCurve(QEasingCurve.OutQuad)
         self.main_fade.start()
+
+    def reshow_for_login(self):
+        """Reset login form and re-show the window for a new login session."""
+        self.id_entry.clear()
+        self.pass_entry.clear()
+        self.status_label.setText("")
+        self.error_label.setText("")
+        self.tick_widget.set_progress(0.0)
+        self.login_btn.setEnabled(True)
+        self.login_btn.setProperty("state", "")
+        self.login_btn.setText("Sign in")
+        self.login_btn.style().unpolish(self.login_btn)
+        self.login_btn.style().polish(self.login_btn)
+
+        self._center_window()
+        self.setWindowOpacity(0.0)
+        self.show()
+        self.activateWindow()
+        QTimer.singleShot(50, self._animate_entrance)
 
     def closeEvent(self, event):
         self.hide()

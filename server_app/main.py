@@ -7,6 +7,22 @@ import logging
 import secrets
 from pathlib import Path
 
+
+def _load_env_file() -> None:
+    root_dir = Path(__file__).resolve().parents[1]
+    env_path = root_dir / ".env"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_env_file()
+
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,22 +39,6 @@ if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 app = FastAPI(title="VaultQ Core Server")
-
-
-def _load_env_file() -> None:
-    root_dir = Path(__file__).resolve().parents[1]
-    env_path = root_dir / ".env"
-    if not env_path.exists():
-        return
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-_load_env_file()
 
 # -----------------------------
 # Configuration
@@ -264,19 +264,21 @@ def root():
 
 @app.get("/admin", response_class=HTMLResponse)
 def serve_admin_portal(request: Request):
+    try:
+        if not state.admin_session_token or request.cookies.get("admin_session") != state.admin_session_token:
 
-    if request.cookies.get("admin_session") != state.admin_session_token:
+            return templates.TemplateResponse(
+                "admin_login.html",
+                {"request": request}
+            )
 
         return templates.TemplateResponse(
-            "admin_login.html",
+            "admin.html",
             {"request": request}
         )
-
-    return templates.TemplateResponse(
-        "admin.html",
-        {"request": request}
-    )
-
+    except Exception as e:
+        logger.error(f"Error serving admin portal: {e}")
+        return HTMLResponse("<h2>Error serving admin portal</h2>", status_code=500)
 # -----------------------------
 # Admin Static Assets
 # -----------------------------

@@ -575,9 +575,10 @@ class ModernMessageBox(QDialog):
             """)
     
 class VaultQDoctorApp(QMainWindow):
-    def __init__(self, doctor_id: str, private_key: bytes, server_url: str = None, enroll_token: str = ""):
+    def __init__(self, doctor_id: str, private_key: bytes, server_url: str = None, enroll_token: str = "", login_window=None):
         super().__init__()
         self.doctor_id = doctor_id
+        self._login_window = login_window
         self.vault = LocalKeyVault()
         self.selected_file_path = None
         self._closing = False
@@ -668,9 +669,16 @@ class VaultQDoctorApp(QMainWindow):
         self.status_label.setObjectName("StatusLabelOffline")
         self.status_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
         
+        self.sign_out_btn = QPushButton("Sign Out")
+        self.sign_out_btn.setObjectName("SignOutBtn")
+        self.sign_out_btn.setMinimumHeight(32)
+        self.sign_out_btn.clicked.connect(self.action_sign_out)
+
         top_layout.addWidget(self.title_label)
         top_layout.addStretch()
         top_layout.addWidget(self.status_label)
+        top_layout.addSpacing(12)
+        top_layout.addWidget(self.sign_out_btn)
 
         workspace = QWidget()
         workspace.setObjectName("Workspace")
@@ -845,7 +853,7 @@ class VaultQDoctorApp(QMainWindow):
         self.change_pass_btn.setMaximumWidth(180)
         self.change_pass_btn.clicked.connect(self.action_change_password)
         layout.addWidget(self.change_pass_btn)
-        
+
         layout.addStretch()
 
     # ---- Theming & Animation ----
@@ -986,6 +994,17 @@ class VaultQDoctorApp(QMainWindow):
                 QPushButton#PrimaryButton:hover {{ background: #007AFF; }}
                 QPushButton#PrimaryButton:disabled {{ background: #3A3A3C; color: #636366; }}
 
+                QPushButton#SignOutBtn {{
+                    background: #3A1C1E;
+                    color: #FF6961;
+                    border: 1px solid #5C2B2E;
+                }}
+                QPushButton#SignOutBtn:hover {{
+                    background: #FF453A;
+                    color: #FFFFFF;
+                    border: 1px solid #FF453A;
+                }}
+
                 QTextEdit#LogBox {{
                     background-color: #151517; 
                     border: 1px solid #38383A; 
@@ -1095,10 +1114,21 @@ class VaultQDoctorApp(QMainWindow):
                 QPushButton#PrimaryButton:hover {{ background: #0056B3; }}
                 QPushButton#PrimaryButton:disabled {{ background: #E5E5EA; color: #8E8E93; }}
 
+                QPushButton#SignOutBtn {{
+                    background: #FFF0F0;
+                    color: #D32F2F;
+                    border: 1px solid #FFCDD2;
+                }}
+                QPushButton#SignOutBtn:hover {{
+                    background: #FF3B30;
+                    color: #FFFFFF;
+                    border: 1px solid #FF3B30;
+                }}
+
                 QTextEdit#LogBox {{
-                    background-color: #FFFFFF; 
-                    border: 1px solid #E5E5EA; 
-                    border-radius: 8px; 
+                    background-color: #FFFFFF;
+                    border: 1px solid #E5E5EA;
+                    border-radius: 8px;
                     padding: 10px;
                 }}
             """)
@@ -1396,6 +1426,30 @@ class VaultQDoctorApp(QMainWindow):
         except Exception as e:
             # USING CUSTOM MODERN MESSAGE BOX (Error State)
             ModernMessageBox(self, "Change Password Error", str(e), is_error=True).exec()
+
+    def action_sign_out(self):
+        reply = QMessageBox.question(
+            self,
+            "Sign Out",
+            "Are you sure you want to sign out?\nYou will need to log in again.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._closing = True
+        try:
+            if hasattr(self.agent, "shutdown"):
+                self.agent.shutdown()
+        except Exception:
+            pass
+
+        if self._login_window is not None:
+            self.hide()
+            self._login_window.reshow_for_login()
+            self.deleteLater()
+        else:
+            self.close()
 
     def _thread_safe_log(self, text: str, level: str = "INFO"):
         self._log_history.append((text, level))
