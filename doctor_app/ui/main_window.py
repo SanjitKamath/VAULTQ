@@ -8,7 +8,7 @@ import requests
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QFileDialog, QTabWidget,
-    QPlainTextEdit, QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
+    QPlainTextEdit, QMessageBox, QDialog, QFormLayout, QComboBox,
     QFrame, QProgressBar, QListWidget, QListWidgetItem, QGraphicsOpacityEffect, QSizeGrip, QTextEdit
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QSettings, QPoint, QParallelAnimationGroup
@@ -364,7 +364,7 @@ class PasswordChangeDialog(QDialog):
                     border-top-right-radius: 12px; 
                 }}
                 QLabel#TitleBarText {{ color: #EBEBF5; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
-                QPushButton#TitleCloseBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; min-width: 46px; max-width: 46px; min-height: 34px; max-height: 34px; padding: 0; margin: 0; border-radius: 0; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
                 QPushButton#TitleCloseBtn:hover {{ background-color: #FF453A; color: #FFFFFF; }}
 
                 QLabel {{ color: #EBEBF5; font-family: {font_family}; font-size: 14px; font-weight: 500; }}
@@ -421,7 +421,7 @@ class PasswordChangeDialog(QDialog):
                     border-top-right-radius: 12px; 
                 }}
                 QLabel#TitleBarText {{ color: #111827; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
-                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; min-width: 46px; max-width: 46px; min-height: 34px; max-height: 34px; padding: 0; margin: 0; border-radius: 0; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
                 QPushButton#TitleCloseBtn:hover {{ background-color: #FF3B30; color: #FFFFFF; }}
 
                 QLabel {{ color: #1D1D1F; font-family: {font_family}; font-size: 14px; font-weight: 500; }}
@@ -549,7 +549,7 @@ class ModernMessageBox(QDialog):
                 QWidget#BgContainer {{ background-color: #1C1C1E; border: 1px solid #38383A; border-radius: 12px; }}
                 QFrame#CustomTitleBar {{ background-color: #242426; border-top-left-radius: 12px; border-top-right-radius: 12px; }}
                 QLabel#TitleBarText {{ color: #EBEBF5; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
-                QPushButton#TitleCloseBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; min-width: 46px; max-width: 46px; min-height: 34px; max-height: 34px; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn {{ color: #8E8E93; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
                 QPushButton#TitleCloseBtn:hover {{ background-color: #FF453A; color: #FFFFFF; }}
                 QLabel {{ color: #EBEBF5; font-family: {font_family}; font-size: 14px; font-weight: 500; }}
                 QPushButton {{ border-radius: 6px; font-size: 14px; font-weight: 600; font-family: {font_family}; }}
@@ -564,7 +564,7 @@ class ModernMessageBox(QDialog):
                 QWidget#BgContainer {{ background-color: #F5F5F7; border: 1px solid #D1D1D6; border-radius: 12px; }}
                 QFrame#CustomTitleBar {{ background-color: #E5E5EA; border-top-left-radius: 12px; border-top-right-radius: 12px; }}
                 QLabel#TitleBarText {{ color: #111827; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
-                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; min-width: 46px; max-width: 46px; min-height: 34px; max-height: 34px; border-top-right-radius: 12px; }}
+                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
                 QPushButton#TitleCloseBtn:hover {{ background-color: #FF3B30; color: #FFFFFF; }}
                 QLabel {{ color: #1D1D1F; font-family: {font_family}; font-size: 14px; font-weight: 500; }}
                 QPushButton {{ border-radius: 6px; font-size: 14px; font-weight: 600; font-family: {font_family}; }}
@@ -585,6 +585,7 @@ class VaultQDoctorApp(QMainWindow):
         
         self.settings = QSettings("VaultQ", "DoctorApp")
         self.is_dark_mode = self.settings.value("theme/is_dark_mode", False, type=bool)
+        self.crypto_suite = os.environ.get("VAULTQ_CRYPTO_SUITE", "PQC")
 
         self._log_history = []
 
@@ -610,6 +611,7 @@ class VaultQDoctorApp(QMainWindow):
         self._apply_theme(self.is_dark_mode)
 
         self.append_log = self._thread_safe_log
+        self.append_log(f"Cryptography suite set to: {self.crypto_suite}", "INFO")
 
         self.agent = SecurityAgent(
             log_callback=self.append_log,
@@ -617,6 +619,7 @@ class VaultQDoctorApp(QMainWindow):
             loaded_private_key=private_key,
             doctor_id=doctor_id,
             enroll_token=self.enroll_token,
+            crypto_suite=self.crypto_suite,
         )
 
         QTimer.singleShot(50, self._process_ui_queue)
@@ -665,6 +668,9 @@ class VaultQDoctorApp(QMainWindow):
         self.title_label = QLabel("VaultQ Workspace")
         self.title_label.setObjectName("AppTitle")
 
+        self.crypto_suite_label = QLabel(f"Suite: {self.crypto_suite}")
+        self.crypto_suite_label.setObjectName("CryptoSuiteLabel")
+
         self.status_label = QLabel("● Disconnected")
         self.status_label.setObjectName("StatusLabelOffline")
         self.status_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
@@ -676,6 +682,8 @@ class VaultQDoctorApp(QMainWindow):
 
         top_layout.addWidget(self.title_label)
         top_layout.addStretch()
+        top_layout.addWidget(self.crypto_suite_label)
+        top_layout.addSpacing(16)
         top_layout.addWidget(self.status_label)
         top_layout.addSpacing(12)
         top_layout.addWidget(self.sign_out_btn)
@@ -854,6 +862,8 @@ class VaultQDoctorApp(QMainWindow):
         self.change_pass_btn.clicked.connect(self.action_change_password)
         layout.addWidget(self.change_pass_btn)
 
+        layout.addSpacing(32)
+
         layout.addStretch()
 
     # ---- Theming & Animation ----
@@ -1013,129 +1023,6 @@ class VaultQDoctorApp(QMainWindow):
                 }}
             """)
 
-        else:
-            self.setStyleSheet(f"""
-                QMainWindow {{ background: transparent; }}
-                
-                QWidget#BgContainer {{ 
-                    background-color: #F5F5F7; 
-                    border: 1px solid #D1D1D6; 
-                    border-radius: 12px; 
-                }}
-                
-                QFrame#CustomTitleBar {{ 
-                    background-color: #E5E5EA; 
-                    border-top-left-radius: 12px; 
-                    border-top-right-radius: 12px; 
-                }}
-                QLabel#TitleBarText {{ color: #111827; font-family: {font_family}; font-size: 13px; font-weight: 600; }}
-                QPushButton#TitleBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; }}
-                QPushButton#TitleBtn:hover {{ background-color: #D1D1D6; color: #1D1D1F; }}
-                QPushButton#TitleCloseBtn {{ color: #6B7280; border: none; background: transparent; font-size: 11px; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif; width: 46px; height: 34px; border-top-right-radius: 12px; }}
-                QPushButton#TitleCloseBtn:hover {{ background-color: #FF3B30; color: #FFFFFF; }}
-
-                QWidget#TopBar {{ background-color: #FFFFFF; border-bottom: 1px solid #E5E5EA; }}
-                QWidget#Workspace {{ background-color: #F5F5F7; }}
-                
-                QLabel {{ color: #1D1D1F; font-family: {font_family}; }}
-                QLabel#AppTitle {{ color: #1D1D1F; font-size: 16px; font-weight: 600; }}
-                QLabel#TabHeader {{ color: #1D1D1F; font-size: 18px; font-weight: 600; }}
-                QLabel#SectionHeader {{ color: #1D1D1F; font-size: 13px; font-weight: 600; }}
-                QLabel#StandardLabel {{ color: #1D1D1F; font-size: 13px; font-weight: 500; }}
-                
-                QLabel#DropIcon {{ color: #8E8E93; }}
-                QLabel#DropText {{ color: #8E8E93; font-size: 14px; }}
-
-                QLabel#StatusLabelOffline {{ color: #FF3B30; }}
-                QLabel#StatusLabelOnline {{ color: #34C759; }}
-
-                QTabWidget::pane {{ 
-                    border: 1px solid #E5E5EA; 
-                    background: #FFFFFF; 
-                    border-radius: 10px; 
-                }}
-                QTabBar::tab {{ 
-                    background: #F5F5F7; 
-                    color: #8E8E93;
-                    border: 1px solid #E5E5EA; 
-                    border-bottom: none;
-                    padding: 10px 20px; 
-                    margin-right: 4px;
-                    border-top-left-radius: 6px; 
-                    border-top-right-radius: 6px; 
-                    font-size: 13px;
-                    font-weight: 500;
-                    font-family: {font_family};
-                }}
-                QTabBar::tab:selected {{ 
-                    background: #FFFFFF; 
-                    color: #1D1D1F; 
-                    border-top: 2px solid #007AFF;
-                }}
-                QTabBar::tab:hover:!selected {{ background: #E5E5EA; }}
-
-                QLineEdit {{ 
-                    padding: 10px 12px; 
-                    background: #FFFFFF; 
-                    color: #1D1D1F; 
-                    border: 1px solid #D1D1D6; 
-                    border-radius: 6px; 
-                    font-size: 14px;
-                    font-family: {font_family};
-                }}
-                QLineEdit:focus {{ border: 1px solid #007AFF; }}
-
-                QFrame#DropZone {{ 
-                    border: 2px dashed #C7C7CC; 
-                    border-radius: 12px; 
-                    background: #F2F2F7; 
-                }}
-                QFrame#DropZone:hover, QFrame#DropZone[dragHover="true"] {{ 
-                    border-color: #8E8E93; 
-                    background: #E5E5EA; 
-                }}
-
-                QPushButton {{ 
-                    padding: 8px 16px; 
-                    background: #FFFFFF; 
-                    color: #1D1D1F; 
-                    border: 1px solid #D1D1D6; 
-                    border-radius: 6px; 
-                    font-weight: 500; 
-                    font-family: {font_family};
-                }}
-                QPushButton:hover {{ background: #F2F2F7; border-color: #C7C7CC; }}
-                
-                QPushButton#PrimaryButton {{ 
-                    background: #007AFF;
-                    color: white; 
-                    border: none; 
-                }}
-                QPushButton#PrimaryButton:hover {{ background: #0056B3; }}
-                QPushButton#PrimaryButton:disabled {{ background: #E5E5EA; color: #8E8E93; }}
-
-                QPushButton#SignOutBtn {{
-                    background: #FFF0F0;
-                    color: #D32F2F;
-                    border: 1px solid #FFCDD2;
-                }}
-                QPushButton#SignOutBtn:hover {{
-                    background: #FF3B30;
-                    color: #FFFFFF;
-                    border: 1px solid #FF3B30;
-                }}
-
-                QTextEdit#LogBox {{
-                    background-color: #FFFFFF;
-                    border: 1px solid #E5E5EA;
-                    border-radius: 8px;
-                    padding: 10px;
-                }}
-            """)
-
-        # 🔧 CRITICAL: re-assert HTML colors for logs after theme change
-        if hasattr(self, "log_box"):
-            self.log_box.setStyleSheet("QTextEdit#LogBox { color: transparent; }")
         else:
             self.setStyleSheet(f"""
                 QMainWindow {{ background: transparent; }}
@@ -1414,7 +1301,12 @@ class VaultQDoctorApp(QMainWindow):
                 return
 
             try:
-                self.vault.change_password(self.doctor_id, old_password, new_password)
+                self.vault.change_password(
+                    self.doctor_id,
+                    old_password,
+                    new_password,
+                    suite=self.crypto_suite,
+                )
             except Exception as vault_err:
                 # USING CUSTOM MODERN MESSAGE BOX (Error State)
                 ModernMessageBox(self, "Local Vault Sync Failed", "Local vault update failed.", is_error=True).exec()

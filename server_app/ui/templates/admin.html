@@ -230,14 +230,17 @@
                 <h1 class="text-lg font-bold tracking-wide text-white">VaultQ <span class="text-slate-500 font-light">Admin</span></h1>
             </div>
             <div class="flex items-center gap-4 text-sm">
-                <span class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-md border border-slate-800 shadow-inner">
-                    <div class="w-2 h-2 rounded-full" :class="stats.ca_status === 'Online' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'"></div>
-                    <span class="text-slate-400">CA Status:</span> <span class="font-bold text-slate-200" x-text="stats.ca_status"></span>
-                </span>
+                <div class="flex items-center gap-4 text-sm border-r border-slate-800 pr-4">
+                    <span class="flex items-center gap-2">
+                        <div class="w-2 h-2 rounded-full" :class="stats.ca_status === 'Online' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'"></div>
+                        <span class="text-slate-400">CA:</span> <span class="font-semibold text-slate-200" x-text="stats.ca_status"></span>
+                    </span>
+                    <span class="flex items-center gap-2">
+                        <span class="text-slate-400">Suite:</span> <span class="font-semibold text-slate-200" x-text="serverState.crypto_suite">Loading...</span>
+                    </span>
+                </div>
                 <button @click="logout()"
-                        style="color:#f87171; border:1px solid #7f1d1d; padding:4px 12px; border-radius:4px; font-size:12px; font-weight:700; transition:all 0.2s;"
-                        onmouseover="this.style.color='#fca5a5'; this.style.borderColor='#b91c1c'"
-                        onmouseout="this.style.color='#f87171'; this.style.borderColor='#7f1d1d'">
+                        class="text-red-400 hover:text-red-300 font-bold text-xs transition-colors">
                     LOGOUT
                 </button>
             </div>
@@ -460,7 +463,8 @@
         function adminApp() {
             return {
                 activeTab: 'patients',
-                stats: { ca_status: 'Connecting...', active_certs: 0, total_doctors: 0, total_patients: 0, ca_algorithm: '...' },
+                stats: { ca_status: 'Connecting...' },
+                serverState: { crypto_suite: 'Loading...' },
                 doctors: [],
                 patients: [],
                 newDocName: '',
@@ -474,35 +478,42 @@
 
                 async refresh() {
                     try {
-                        const [statsRes, docsRes, patsRes] = await Promise.all([
+                        const [statsRes, docsRes, patsRes, stateRes] = await Promise.all([
                             fetch('/api/admin/stats', { credentials: 'same-origin' }),
                             fetch('/api/admin/doctors', { credentials: 'same-origin' }),
                             fetch('/api/patient/admin/list', { credentials: 'same-origin' }),
+                            fetch('/api/admin/state', { credentials: 'same-origin' }),
                         ]);
-                        if (statsRes.status === 401 || docsRes.status === 401) {
+
+                        if (statsRes.status === 401 || docsRes.status === 401 || stateRes.status === 401) {
                             window.location.href = '/admin';
                             return;
                         }
+
                         this.stats = await statsRes.json();
                         this.doctors = await docsRes.json();
                         this.patients = await patsRes.json();
+                        this.serverState = await stateRes.json();
+
                     } catch (e) {
                         console.error("Failed to refresh dashboard:", e);
+                        alert("Network error: " + e.message);
                     }
                 },
 
-                // ── Doctor Management ──────────────────────────
                 async provisionDoctor() {
                     if (!this.newDocName) return;
+
                     try {
-                        const resp = await fetch(`/api/admin/doctors/provision?name=${encodeURIComponent(this.newDocName)}`, { 
+                        const resp = await fetch(`/api/admin/doctors/provision?name=${encodeURIComponent(this.newDocName)}`, {
                             method: 'POST',
                             credentials: 'same-origin',
                         });
+
                         if (resp.ok) {
                             this.lastProvisioned = await resp.json();
                             this.newDocName = '';
-                            await this.refresh(); 
+                            await this.refresh();
                         } else {
                             alert("Server Error: Could not provision doctor.");
                         }
@@ -517,6 +528,7 @@
                             method: 'POST',
                             credentials: 'same-origin',
                         });
+
                         if (resp.ok) {
                             await this.refresh();
                         } else if (resp.status === 400) {
@@ -532,19 +544,26 @@
 
                 async recoverDoctorAccess(doctorId) {
                     if (!confirm(`Recover ${doctorId}? This will revoke active certs and force key re-enrollment.`)) return;
+
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/recover-access`, {
                             method: 'POST',
                             credentials: 'same-origin',
                         });
+
                         const body = await resp.json().catch(() => ({}));
+
                         if (!resp.ok) {
                             alert(body.detail || "Failed to recover doctor access.");
                             return;
                         }
+
                         this.lastProvisioned = { id: body.doctor_id, password: body.password };
+
                         alert(`Recovery credentials generated for ${body.doctor_id}. Active certs revoked: ${body.revoked_active_certs || 0}.`);
+
                         await this.refresh();
+
                     } catch (e) {
                         alert("Network error while recovering doctor access.");
                     }
@@ -552,18 +571,24 @@
 
                 async refreshCert(doctorId) {
                     if (!confirm(`Rotate certificate for ${doctorId}? Existing active certs will be revoked.`)) return;
+
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/refresh-cert`, {
                             method: 'POST',
                             credentials: 'same-origin',
                         });
+
                         const body = await resp.json().catch(() => ({}));
+
                         if (!resp.ok) {
                             alert(body.detail || "Failed to refresh certificate.");
                             return;
                         }
+
                         alert(`Certificate refreshed (revoked ${body.revoked_count || 0} old certs).`);
+
                         await this.refresh();
+
                     } catch (e) {
                         alert("Network error while refreshing certificate.");
                     }
@@ -571,18 +596,24 @@
 
                 async revokeCert(doctorId) {
                     if (!confirm(`Revoke all active certificates for ${doctorId}?`)) return;
+
                     try {
                         const resp = await fetch(`/api/admin/doctors/${doctorId}/revoke-cert`, {
                             method: 'POST',
                             credentials: 'same-origin',
                         });
+
                         const body = await resp.json().catch(() => ({}));
+
                         if (!resp.ok) {
                             alert(body.detail || "Failed to revoke certificate.");
                             return;
                         }
+
                         alert(`Revoked ${body.revoked_count || 0} active certificate(s).`);
+
                         await this.refresh();
+
                     } catch (e) {
                         alert("Network error while revoking certificate.");
                     }
@@ -594,6 +625,7 @@
                             method: 'DELETE',
                             credentials: 'same-origin',
                         });
+
                         if (resp.ok) {
                             await this.refresh();
                         } else {
@@ -602,14 +634,15 @@
                     }
                 },
 
-                // ── Patient Management ──────────────────────────
                 async provisionPatient() {
                     if (!this.newPatientName) return;
+
                     try {
                         const resp = await fetch(`/api/patient/admin/provision?name=${encodeURIComponent(this.newPatientName)}`, {
                             method: 'POST',
                             credentials: 'same-origin',
                         });
+
                         if (resp.ok) {
                             this.lastProvisionedPatient = await resp.json();
                             this.newPatientName = '';
@@ -617,6 +650,7 @@
                         } else {
                             alert("Server Error: Could not provision patient.");
                         }
+
                     } catch (e) {
                         alert("Network error: " + e.message);
                     }
@@ -624,8 +658,13 @@
 
                 async updatePatientPassword(patientId) {
                     const newPassword = prompt(`Enter a new password for ${patientId}:`);
+
                     if (newPassword === null) return;
-                    if (!newPassword.trim()) { alert("Password cannot be empty."); return; }
+                    if (!newPassword.trim()) {
+                        alert("Password cannot be empty.");
+                        return;
+                    }
+
                     try {
                         const resp = await fetch(`/api/patient/admin/${patientId}/password`, {
                             method: 'PUT',
@@ -633,12 +672,15 @@
                             credentials: 'same-origin',
                             body: JSON.stringify({ password: newPassword.trim() })
                         });
+
                         if (!resp.ok) {
                             const err = await resp.json().catch(() => ({}));
                             alert(err.detail || "Failed to update password.");
                             return;
                         }
+
                         alert("Patient password updated successfully.");
+
                     } catch (e) {
                         alert("Network error while updating password.");
                     }
@@ -650,6 +692,7 @@
                             method: 'DELETE',
                             credentials: 'same-origin',
                         });
+
                         if (resp.ok) {
                             await this.refresh();
                         } else {
@@ -664,13 +707,10 @@
                             method: 'POST',
                             credentials: 'same-origin',
                         });
-                    } catch (e) {
-                        // Redirect even if the request fails
-                    }
+                    } catch (e) {}
+
                     window.location.href = '/admin';
                 }
             }
         }
     </script>
-</body>
-</html>

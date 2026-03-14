@@ -211,7 +211,7 @@ class VaultQDatabase:
             return pwd
         return hash_password(pwd)
 
-    def add_pre_authorized_doctor(self, doc_id, name, password):
+    def add_pre_authorized_doctor(self, doc_id, name, password, crypto_suite=None):
         hashed_password = self._ensure_password_hash(password)
         self.doctors[doc_id] = {
             "id": doc_id,
@@ -222,6 +222,7 @@ class VaultQDatabase:
             "pqc_public_key_b64": None,
             "tls_public_key_pem": None,
             "csr_pem": None,
+            "crypto_suite": crypto_suite,
         }
         self.audit.info("DB add_pre_authorized_doctor: doctor_id=%s", doc_id)
         self.save_db()

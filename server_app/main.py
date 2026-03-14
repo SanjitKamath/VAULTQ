@@ -6,7 +6,7 @@ import asyncio
 import logging
 import secrets
 from pathlib import Path
-
+from pydantic import BaseModel
 
 def _load_env_file() -> None:
     root_dir = Path(__file__).resolve().parents[1]
@@ -68,6 +68,7 @@ REQUIRE_MTLS = os.getenv("VAULTQ_REQUIRE_MTLS", "1") == "1"
 
 # Initialize empty admin session
 state.admin_session_token = None
+logger.info(f"Cryptography suite set to: {state.crypto_suite}")
 
 # -----------------------------
 # Paths
@@ -264,21 +265,37 @@ def root():
 
 @app.get("/admin", response_class=HTMLResponse)
 def serve_admin_portal(request: Request):
-    try:
-        if not state.admin_session_token or request.cookies.get("admin_session") != state.admin_session_token:
+    session_cookie = (request.cookies.get("admin_session") or "").strip()
+    active_session = (state.admin_session_token or "").strip()
 
-            return templates.TemplateResponse(
-                "admin_login.html",
-                {"request": request}
-            )
+    # Require an actual non-empty session token before serving admin dashboard.
+    if not active_session or session_cookie != active_session:
 
         return templates.TemplateResponse(
-            "admin.html",
+            "admin_login.html",
             {"request": request}
         )
-    except Exception as e:
-        logger.error(f"Error serving admin portal: {e}")
-        return HTMLResponse("<h2>Error serving admin portal</h2>", status_code=500)
+
+    return templates.TemplateResponse(
+        "admin.html",
+        {"request": request, "CSRF_TOKEN": "PLACEHOLDER_CSRF_TOKEN"}
+    )
+
+class CryptoSuiteSetting(BaseModel):
+    suite: str
+
+@app.get("/api/admin/settings/crypto-suite")
+def get_crypto_suite():
+    return {"suite": state.crypto_suite}
+
+@app.post("/api/admin/settings/crypto-suite")
+def set_crypto_suite(setting: CryptoSuiteSetting):
+    if setting.suite not in ["PQC", "Classical"]:
+        return JSONResponse(status_code=400, content={"detail": "Invalid crypto suite"})
+    state.crypto_suite = setting.suite
+    state.audit.info(f"Crypto suite updated to: {state.crypto_suite}")
+    return {"status": "ok"}
+
 # -----------------------------
 # Admin Static Assets
 # -----------------------------

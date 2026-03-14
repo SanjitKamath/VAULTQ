@@ -6,6 +6,7 @@ from security_suite.crypto import ECDHManager, KEMManager
 # Import the bootstrapping function we wrote earlier
 from .ca_setup import bootstrap_hospital_root_ca
 from .master_key_store import MasterKeyStore
+from .server_rsa_key_store import ServerRSAKeyStore
 from .audit_logger import get_audit_logger
 
 class ServerState:
@@ -18,9 +19,14 @@ class ServerState:
         self.audit.info("ServerState init: hospital root certificate bootstrapped")
 
         # 2. Long-term Server Identity Keys for the Handshake
+        self.crypto_suite = os.environ.get("VAULTQ_CRYPTO_SUITE", "PQC")
         self.ecdh = ECDHManager()
-        self.kem = KEMManager()
-        self.audit.info("ServerState init: handshake identities ready (ECDH + PQC KEM)")
+        if "Classical" in self.crypto_suite:
+            self.rsa = ServerRSAKeyStore().load_or_create()
+            self.audit.info("ServerState init: handshake identities ready (ECDH + RSA)")
+        else:
+            self.kem = KEMManager()
+            self.audit.info("ServerState init: handshake identities ready (ECDH + PQC KEM)")
         
         # Temporary in-memory session store (Session ID -> Session Key)
         self.active_sessions = {}
@@ -43,6 +49,9 @@ class ServerState:
             from .vault_storage import LocalVaultStorage
             self.vault_storage = LocalVaultStorage()
         self.audit.info("ServerState init: vault storage backend=%s", backend)
+
+        # Cryptography suite setting
+        self.audit.info("ServerState init: crypto suite=%s", self.crypto_suite)
 
     def replay_seen_or_store(self, message_id: str, ttl_seconds: int) -> bool:
         """

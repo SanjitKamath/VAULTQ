@@ -142,6 +142,14 @@ def list_doctors(_: None = Depends(require_admin_session)):
     return db.get_all_doctors()
 
 
+@router.get("/state", dependencies=[Depends(require_admin_session)])
+async def get_server_state():
+    """Returns the current server state, including crypto suite."""
+    return {
+        "crypto_suite": state.crypto_suite,
+    }
+
+
 # -------------------------------------------------------------------
 # DOCTOR MANAGEMENT
 # -------------------------------------------------------------------
@@ -153,7 +161,7 @@ def provision_doctor(name: str, _: None = Depends(require_admin_session)):
     doc_id = "doc_" + secrets.token_hex(3)
     temp_pass = _generate_temp_password()
 
-    db.add_pre_authorized_doctor(doc_id, name, hash_password(temp_pass))
+    db.add_pre_authorized_doctor(doc_id, name, hash_password(temp_pass), crypto_suite=state.crypto_suite)
 
     audit.info("Admin doctor provision succeeded for doctor_id=%s", doc_id)
 
@@ -176,6 +184,7 @@ def recover_doctor_access(doctor_id: str, _: None = Depends(require_admin_sessio
     doc["pqc_public_key_b64"] = None
     doc["tls_public_key_pem"] = None
     doc["status"] = "authorized"
+    doc["crypto_suite"] = state.crypto_suite
 
     db.save_db()
 

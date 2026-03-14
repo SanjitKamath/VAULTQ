@@ -8,7 +8,8 @@ import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.keywrap import aes_key_wrap
 
-from security_suite.crypto import DSAManager
+from security_suite.crypto import DSAManager, hybrid_session as pqc_hybrid
+from security_suite.classical import hybrid as classical_hybrid, rsa as rsa_classical
 from security_suite.security.models import SecureEnvelope
 from security_suite.security.integrity import sha256_hex, build_doctor_signature_message
 
@@ -59,6 +60,7 @@ class SecurityAgent:
         loaded_private_key: bytes = None,
         doctor_id: str = None,
         enroll_token: str = "",
+        crypto_suite: str = "PQC",
     ):
         self.log = log_callback
         self.status = status_callback
@@ -66,26 +68,61 @@ class SecurityAgent:
         self.audit = get_audit_logger()
         self.is_connected = False
         self.enroll_token = (enroll_token or "").strip()
+        self.crypto_suite = crypto_suite
+        self.hybrid_session = None
+        self._server_classical_public_key = None
+        
+        self.update_crypto_suite(crypto_suite)
         
         keys_dir = Path(getattr(config, "keys_dir", str(Path(__file__).resolve().parents[1] / "storage" / "keys")))
         keys_dir.mkdir(parents=True, exist_ok=True)
-        self.cert_path = str(keys_dir / "doctor_cert.pem")
-        self.key_path = str(keys_dir / "doctor_container.key")
+        doc_tag = "".join(
+            c if c.isalnum() or c in ("-", "_") else "_"
+            for c in (self.doctor_id or "unknown")
+        )
+        self.cert_path = str(keys_dir / f"{doc_tag}_doctor_cert.pem")
+        self.key_path = str(keys_dir / f"{doc_tag}_doctor_container.key")
+        legacy_cert_path = keys_dir / "doctor_cert.pem"
+        legacy_key_path = keys_dir / "doctor_container.key"
+        # Backward compatibility: migrate shared legacy TLS assets to doctor-scoped paths.
+        if not os.path.exists(self.cert_path) and legacy_cert_path.exists():
+            Path(self.cert_path).write_bytes(legacy_cert_path.read_bytes())
+        if not os.path.exists(self.key_path) and legacy_key_path.exists():
+            Path(self.key_path).write_bytes(legacy_key_path.read_bytes())
         self.ca_cert_path = config.ca_cert_path
         
         self.log("Security agent initialized", "INFO")
         self.audit.info("SecurityAgent init for doctor_id=%s", self.doctor_id)
         
         # Load existing ML-DSA Identity for application-layer signing
-        if loaded_private_key:
-            self.signer = DSAManager(private_bytes=loaded_private_key)
-            self.log("Existing ML-DSA Identity loaded from secure vault.", "INFO")
-            self.audit.info("SecurityAgent: loaded existing ML-DSA identity for doctor_id=%s", self.doctor_id)
+        if "Classical" in self.crypto_suite:
+            if loaded_private_key:
+                self.signer = rsa_classical.RSAManager(private_bytes=loaded_private_key)
+                self.log("Existing RSA Identity loaded from secure vault.", "INFO")
+                self.audit.info("SecurityAgent: loaded existing RSA identity for doctor_id=%s", self.doctor_id)
+            else:
+                self.signer = rsa_classical.RSAManager()
+                self.log("New RSA Identity generated.", "INFO")
+                self.audit.info("SecurityAgent: generated new RSA identity for doctor_id=%s", self.doctor_id)
         else:
-            self.signer = DSAManager(private_bytes=None)
-            self.signer.generate_keypair() 
-            self.log("New ML-DSA Identity generated.", "INFO")
-            self.audit.info("SecurityAgent: generated new ML-DSA identity for doctor_id=%s", self.doctor_id)
+            if loaded_private_key:
+                self.signer = DSAManager(private_bytes=loaded_private_key)
+                self.log("Existing ML-DSA Identity loaded from secure vault.", "INFO")
+                self.audit.info("SecurityAgent: loaded existing ML-DSA identity for doctor_id=%s", self.doctor_id)
+            else:
+                self.signer = DSAManager(private_bytes=None)
+                self.signer.generate_keypair() 
+                self.log("New ML-DSA Identity generated.", "INFO")
+                self.audit.info("SecurityAgent: generated new ML-DSA identity for doctor_id=%s", self.doctor_id)
+
+    def update_crypto_suite(self, suite: str):
+        self.crypto_suite = suite
+        if "Classical" in self.crypto_suite:
+            self.hybrid_session = classical_hybrid
+            self.log("Crypto suite switched to Classical", "INFO")
+        else:
+            self.hybrid_session = pqc_hybrid
+            self.log("Crypto suite switched to PQC", "INFO")
 
     def initiate_handshake(self):
         """
@@ -200,46 +237,85 @@ class SecurityAgent:
             )
             self.update_status(False)
 
-    def prepare_patient_payload(self, patient_id: str, file_data: bytes) -> dict:
+    def _get_server_classical_public_key(self):
+        if self._server_classical_public_key is not None:
+            return self._server_classical_public_key
+
+        resp = requests.get(
+            f"{config.server_url}/api/doctor/classical/public-key",
+            timeout=10,
+            **self._tls_request_kwargs(),
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        public_key_b64 = body.get("public_key_b64")
+        if not public_key_b64:
+            raise ValueError("Server classical public key missing from response.")
+
+        public_key_bytes = base64.b64decode(public_key_b64)
+        self._server_classical_public_key = rsa_classical.load_public_key(public_key_bytes)
+        return self._server_classical_public_key
+
+    def prepare_patient_payload(self, patient_id: str, file_data: bytes, server_rsa_public_key=None) -> dict:
         """
         Implements proper Envelope Encryption for At-Rest Data. 
         The DEK is securely wrapped before transmission.
         """
-        self.log("Generating one-time Data Encryption Key (DEK)...", "DEBUG")
+        if "Classical" in self.crypto_suite:
+            self.log("Generating one-time Data Encryption Key (DEK) for AES...", "DEBUG")
+        else:
+            self.log("Generating one-time Data Encryption Key (DEK)...", "DEBUG")
         
         # 1. Generate DEK and encrypt the patient file
         dek = AESGCM.generate_key(bit_length=256)
         aesgcm = AESGCM(dek)
         nonce = os.urandom(12)
         
-        self.log("Encrypting medical record for Patient...", "DEBUG")
+        if "Classical" in self.crypto_suite:
+            self.log("Encrypting medical record for Patient using AES-GCM...", "DEBUG")
+        else:
+            self.log("Encrypting medical record for Patient...", "DEBUG")
         _print_crypto_data("Patient payload plaintext (before DEK encryption)", file_data)
         encrypted_payload = aesgcm.encrypt(nonce, file_data, None)
         _print_crypto_data("Patient payload ciphertext (after DEK encryption)", encrypted_payload)
         
-        # 2. Wrap the DEK with an ephemeral transport key placeholder.
-        # End-to-end KEK exchange should be integrated with server-side unwrapping in a dedicated key service.
-        wrapped_dek = aes_key_wrap(os.urandom(32), dek)
+        # 2. Wrap the DEK for transport.
+        if "Classical" in self.crypto_suite:
+            if server_rsa_public_key is None:
+                raise ValueError("Server RSA public key is required for classical payload packaging.")
+            self.log("Wrapping AES DEK with Server RSA public key...", "DEBUG")
+            wrapped_dek = rsa_classical.rsa_encrypt(server_rsa_public_key, dek)
+        else:
+            # End-to-end KEK exchange should be integrated with server-side unwrapping in a dedicated key service.
+            wrapped_dek = aes_key_wrap(os.urandom(32), dek)
         
-        # 3. Sign the ciphertext with the Doctor's ML-DSA private key
-        self.log("Signing patient payload with ML-DSA Identity...", "DEBUG")
+        # 3. Sign the ciphertext with the Doctor's private key
+        if "Classical" in self.crypto_suite:
+            self.log("Signing patient payload with RSA Identity...", "DEBUG")
+        else:
+            self.log("Signing patient payload with ML-DSA Identity...", "DEBUG")
         signature = self.signer.sign(encrypted_payload)
         
         if not signature:
-            raise ValueError("ML-DSA Signer failed to generate a signature.")
+            if "Classical" in self.crypto_suite:
+                raise ValueError("RSA Signer failed to generate a signature.")
+            else:
+                raise ValueError("ML-DSA Signer failed to generate a signature.")
             
         pub_bytes = self.signer.get_public_bytes()
         encoded_pub_key = base64.b64encode(pub_bytes).decode() if pub_bytes else ""
         
-        return {
+        package = {
             "nonce": base64.b64encode(nonce).decode(),
             "wrapped_dek": base64.b64encode(wrapped_dek).decode(),
-            "dek_b64": base64.b64encode(dek).decode(),
             "patient_id": patient_id,
             "encrypted_payload": base64.b64encode(encrypted_payload).decode(),
             "doctor_signature": base64.b64encode(signature).decode(),
-            "doctor_public_key": encoded_pub_key
+            "doctor_public_key": encoded_pub_key,
         }
+        if "Classical" not in self.crypto_suite:
+            package["dek_b64"] = base64.b64encode(dek).decode()
+        return package
 
     def process_and_upload(self, form: UploadForm):
         """Prepares application-layer envelope and uploads over mTLS."""
@@ -257,7 +333,14 @@ class SecurityAgent:
                 file_bytes = f.read()
 
             # Layer 1: At-Rest Encryption (Envelope Encryption for the Patient/Server)
-            patient_package = self.prepare_patient_payload(form.patient_id, file_bytes)
+            server_rsa_public_key = None
+            if "Classical" in self.crypto_suite:
+                server_rsa_public_key = self._get_server_classical_public_key()
+            patient_package = self.prepare_patient_payload(
+                form.patient_id,
+                file_bytes,
+                server_rsa_public_key=server_rsa_public_key,
+            )
             
             # Since mTLS handles transport encryption, we no longer double-encrypt the payload here.
             # We simply JSONify the patient package to prepare it for signing.
@@ -266,10 +349,14 @@ class SecurityAgent:
             payload_hash = sha256_hex(payload_bytes)
 
             # Layer 2: Server Authentication Signature (Application Layer Integrity)
-            self.log("Signing transport envelope for Server...", "DEBUG")
+            if "Classical" in self.crypto_suite:
+                self.log("Signing transport envelope for Server with RSA...", "DEBUG")
+            else:
+                self.log("Signing transport envelope for Server...", "DEBUG")
             envelope_nonce_b64 = base64.b64encode(os.urandom(12)).decode()
             envelope_timestamp = int(time.time())
             envelope_kid = self.doctor_id or config.doctor_kid or "unknown_kid"
+            message_id = f"{envelope_kid}:{envelope_nonce_b64}:{envelope_timestamp}"
             
             signature_message = build_doctor_signature_message(
                 kid=envelope_kid,
@@ -296,6 +383,7 @@ class SecurityAgent:
 
             # Transmit securely over mTLS
             self.log("Transmitting Secure Envelope over mTLS...", "INFO")
+            upload_start = time.perf_counter()
             resp = requests.post(
                 f"{config.server_url}/api/doctor/upload", 
                 json=envelope.model_dump(),
@@ -303,8 +391,15 @@ class SecurityAgent:
                 **self._tls_request_kwargs(),
             )
             resp.raise_for_status()
+            upload_rtt_s = time.perf_counter() - upload_start
+            response_body = resp.json()
+            record_id = response_body.get("record_id")
             
-            self.log(f"Upload Successful! ID: {resp.json().get('record_id')}", "SUCCESS")
+            self.log(f"Upload Successful! ID: {record_id}", "SUCCESS")
+            self.log(
+                f"Upload RTT ({self.crypto_suite}): {upload_rtt_s:.3f} s | msg={message_id} | patient={form.patient_id} | record={record_id}",
+                "INFO",
+            )
             self.audit.info("Upload success doctor_id=%s patient_id=%s", self.doctor_id, form.patient_id)
 
         except requests.exceptions.SSLError as e:

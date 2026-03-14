@@ -16,6 +16,7 @@ from security_suite.security.integrity import (
     build_doctor_signature_message,
 )
 from security_suite.crypto import DSAManager
+from security_suite.classical import rsa as rsa_classical
 from security_suite.security.certificates import (
     load_pem_certificate,
     extract_pqc_public_key_from_cert,
@@ -109,6 +110,19 @@ def _build_legacy_record_hash_message(*, master_kid: str, timestamp: int, patien
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+@router.get("/classical/public-key")
+def get_classical_public_key():
+    """Returns server RSA public key for classical envelope DEK wrapping."""
+    if "Classical" not in state.crypto_suite:
+        raise HTTPException(status_code=400, detail="Classical suite is not active.")
+
+    pub_bytes = state.rsa.get_public_bytes()
+    return {
+        "suite": state.crypto_suite,
+        "public_key_b64": base64.b64encode(pub_bytes).decode(),
+    }
 
 
 @router.post("/upload")
@@ -225,6 +239,7 @@ def receive_record(envelope: SecureEnvelope):
         )
         raise HTTPException(status_code=403, detail="Certificate chain/signature validation failed.")
 
+    verify_phase_start = time.perf_counter()
     try:
         # payload_bytes is now the plaintext JSON because mTLS handled the transport layer
         if len(envelope.payload) > MAX_B64_PAYLOAD_BYTES:
@@ -289,13 +304,64 @@ def receive_record(envelope: SecureEnvelope):
         payload_hash=envelope.payload_hash,
     )
 
-    verifier = DSAManager(private_bytes=None)
-    is_verified = verifier.verify(signature_message, signature_bytes, cert_bound_doctor_pub)
+    if "Classical" in state.crypto_suite:
+        rsa_pub = rsa_classical.load_public_key(cert_bound_doctor_pub)
+        is_verified = rsa_classical.rsa_verify(rsa_pub, signature_message, signature_bytes)
+    else:
+        verifier = DSAManager(private_bytes=None)
+        is_verified = verifier.verify(signature_message, signature_bytes, cert_bound_doctor_pub)
+
     if not is_verified:
         audit.warning("Upload rejected: signature verification failed for doctor_id=%s", doctor_id)
+        if "Classical" in state.crypto_suite:
+            raise HTTPException(status_code=401, detail="Invalid RSA Signature")
         raise HTTPException(status_code=401, detail="Invalid PQC Signature")
+
+    # For classical uploads, ensure the message envelope can be fully decrypted.
+    classical_plaintext = None
+    if "Classical" in state.crypto_suite:
+        try:
+            classical_package = json.loads(payload_bytes.decode("utf-8"))
+            wrapped_dek_b64 = classical_package.get("wrapped_dek")
+            data_nonce_b64 = classical_package.get("nonce")
+            data_ciphertext_b64 = classical_package.get("encrypted_payload")
+            package_patient_id = classical_package.get("patient_id")
+
+            if not wrapped_dek_b64 or not data_nonce_b64 or not data_ciphertext_b64:
+                raise ValueError("classical package missing required fields")
+
+            if package_patient_id and str(package_patient_id) != str(envelope.patient_id):
+                raise ValueError("patient_id mismatch between envelope and classical payload")
+
+            wrapped_dek = base64.b64decode(wrapped_dek_b64)
+            data_nonce = base64.b64decode(data_nonce_b64)
+            data_ciphertext = base64.b64decode(data_ciphertext_b64)
+
+            dek = state.rsa.decapsulate(wrapped_dek)
+            classical_plaintext = AESGCM(dek).decrypt(data_nonce, data_ciphertext, None)
+        except Exception as exc:
+            audit.warning(
+                "Upload rejected: classical decrypt validation failed for doctor_id=%s message_id=%s reason=%s",
+                doctor_id,
+                message_id,
+                str(exc),
+            )
+            raise HTTPException(status_code=400, detail="Classical envelope decrypt validation failed.")
+
+    verify_phase_rtt_s = time.perf_counter() - verify_phase_start
     
-    audit.info("Application-layer signature verification passed for doctor_id=%s", doctor_id)
+    if "Classical" in state.crypto_suite:
+        audit.info("Application-layer RSA signature verification passed for doctor_id=%s", doctor_id)
+    else:
+        audit.info("Application-layer signature verification passed for doctor_id=%s", doctor_id)
+    audit.info(
+        "Upload verification RTT suite=%s doctor_id=%s patient_id=%s message_id=%s rtt_s=%.3f (decode + decrypt + integrity + signature verify)",
+        state.crypto_suite,
+        doctor_id,
+        envelope.patient_id,
+        message_id,
+        verify_phase_rtt_s,
+    )
 
     # --- 3. EXTRACT PATIENT ID + ENVELOPE-ENCRYPT WITH PER-RECORD DEK ---
     patient_id = envelope.patient_id
