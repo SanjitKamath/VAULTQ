@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Response, Cookie, Request, Header
 from ..core.database import db
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import verify_password  # <-- IMPORT THE SECURE VERIFIER
+from ..core.server_state import state
 from ..core.admin_auth import (
     create_admin_session as create_server_admin_session,
     revoke_admin_session,
@@ -68,6 +69,44 @@ def _parse_enroll_token_ttl() -> int:
 
 
 ENROLL_TOKEN_TTL_SECONDS = _parse_enroll_token_ttl()
+
+
+def _normalize_suite_name(suite_value: str) -> str:
+    return "Classical (RSA+AES)" if "Classical" in str(suite_value or "") else "PQC (Default)"
+
+
+def _enforce_doctor_suite_or_raise(doc: dict, doctor_id: str):
+    active_suite = _normalize_suite_name(state.crypto_suite)
+    bound_suite = _normalize_suite_name(doc.get("crypto_suite")) if doc.get("crypto_suite") else None
+    has_enrollment_artifacts = bool(
+        doc.get("csr_pem")
+        or doc.get("pqc_public_key_b64")
+        or doc.get("tls_public_key_pem")
+        or any(c.get("doctor_id") == doctor_id for c in getattr(db, "certificates", {}).values())
+    )
+
+    if not bound_suite and has_enrollment_artifacts:
+        audit.warning(
+            "Suite binding missing for enrolled doctor_id=%s while active_suite=%s",
+            doctor_id,
+            active_suite,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Credential suite mismatch. This account was enrolled before suite binding and cannot auto-switch suites. Ask admin to recover access for the active suite.",
+        )
+
+    if bound_suite and bound_suite != active_suite:
+        audit.warning(
+            "Suite mismatch for doctor_id=%s bound_suite=%s active_suite=%s",
+            doctor_id,
+            bound_suite,
+            active_suite,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Credential suite mismatch. Account is bound to {bound_suite} but server is running {active_suite}.",
+        )
 
 
 def _is_mtls_listener_request(request: Request) -> bool:
@@ -221,6 +260,8 @@ def verify_doctor_credentials(payload: dict):
         audit.warning("Auth failed: invalid password for doctor_id=%s", doc_id)
         raise HTTPException(status_code=401, detail="Incorrect password.")
 
+    _enforce_doctor_suite_or_raise(stored_doc, doc_id)
+
     audit.info("Auth success for doctor_id=%s", doc_id)
     return {"status": "authorized", "name": stored_doc["name"]}
 
@@ -301,6 +342,8 @@ def preenroll_verify_doctor_credentials(payload: dict):
         audit.warning("Pre-enroll auth failed: invalid password for doctor_id=%s", doc_id)
         raise HTTPException(status_code=401, detail="Incorrect password.")
 
+    _enforce_doctor_suite_or_raise(stored_doc, doc_id)
+
     enroll_token = secrets.token_urlsafe(32)
     expires_at = time.time() + ENROLL_TOKEN_TTL_SECONDS
     db.issue_enrollment_token(enroll_token, doc_id, expires_at)
@@ -364,6 +407,8 @@ def preenroll_onboard_doctor(
         audit.warning("Pre-enroll onboarding rejected: unprovisioned doctor_id=%s", payload.id)
         raise HTTPException(status_code=404, detail="Doctor ID not provisioned.")
 
+    _enforce_doctor_suite_or_raise(doc, payload.id)
+
     try:
         doctor_csr = load_pem_csr(payload.csr_pem)
         if not verify_csr_signature(doctor_csr):
@@ -392,6 +437,7 @@ def preenroll_onboard_doctor(
     doc["tls_public_key_pem"] = tls_pub_pem
     doc["pqc_public_key_b64"] = base64.b64encode(pqc_pub_bytes).decode("utf-8")
     doc["status"] = "pending"
+    doc["crypto_suite"] = _normalize_suite_name(state.crypto_suite)
     revoked = db.revoke_active_certificates(payload.id, reason="keys_reenrolled")
     db.save_db()
     audit.info(

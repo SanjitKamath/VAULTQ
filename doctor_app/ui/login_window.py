@@ -8,13 +8,15 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QInputDialog, QGraphicsDropShadowEffect, QFrame
+    QPushButton, QMessageBox, QInputDialog, QGraphicsDropShadowEffect, QFrame, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QPoint, Property, QRectF, QSettings
 from PySide6.QtGui import QFont, QCursor, QColor, QPainter, QPen
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
+from cryptography import x509
+from cryptography.x509.oid import NameOID
 
 from security_suite.security.certificates import generate_doctor_csr_pem
 from doctor_app.ui.main_window import VaultQDoctorApp
@@ -164,6 +166,7 @@ class LoginWindow(QMainWindow):
             raise RuntimeError("Insecure pre-enroll URL blocked. Configure VAULTQ_PRE_ENROLL_URL with https://")
 
         self.vault = LocalKeyVault()
+        self.crypto_suite = os.environ.get("VAULTQ_CRYPTO_SUITE", "PQC (Default)")
         
         # Read the global settings preference to match Main Window
         self.settings = QSettings("VaultQ", "DoctorApp")
@@ -190,10 +193,31 @@ class LoginWindow(QMainWindow):
         os.makedirs(keys_dir, exist_ok=True)
         return keys_dir
 
-    def _clear_local_tls_assets(self):
+    def _doctor_file_tag(self, doc_id: str) -> str:
+        return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in (doc_id or "unknown"))
+
+    def _doctor_tls_paths(self, doc_id: str):
         keys_dir = self._keys_dir()
-        for name in ("doctor_container.key", "doctor_cert.pem"):
-            path = os.path.join(keys_dir, name)
+        tag = self._doctor_file_tag(doc_id)
+        cert_path = os.path.join(keys_dir, f"{tag}_doctor_cert.pem")
+        key_path = os.path.join(keys_dir, f"{tag}_doctor_container.key")
+        return cert_path, key_path
+
+    def _legacy_tls_paths(self):
+        keys_dir = self._keys_dir()
+        return (
+            os.path.join(keys_dir, "doctor_cert.pem"),
+            os.path.join(keys_dir, "doctor_container.key"),
+        )
+
+    def _clear_local_tls_assets(self, doc_id: str = None):
+        paths = []
+        if doc_id:
+            cert_path, key_path = self._doctor_tls_paths(doc_id)
+            paths.extend([cert_path, key_path])
+        legacy_cert, legacy_key = self._legacy_tls_paths()
+        paths.extend([legacy_key, legacy_cert])
+        for path in paths:
             if os.path.exists(path):
                 os.remove(path)
 
@@ -211,6 +235,32 @@ class LoginWindow(QMainWindow):
             raise RuntimeError("Insecure server URL blocked. VaultQ requires HTTPS.")
         self._copy_server_ca_if_available()
         return self._request_verify_arg()
+
+    def _tls_assets_valid_for_doctor(self, doc_id: str) -> bool:
+        cert_path, key_path = self._doctor_tls_paths(doc_id)
+        if not os.path.exists(cert_path) or not os.path.exists(key_path):
+            return False
+        try:
+            with open(cert_path, "rb") as f:
+                cert_obj = x509.load_pem_x509_certificate(f.read())
+            with open(key_path, "rb") as f:
+                key_obj = serialization.load_pem_private_key(f.read(), password=None)
+
+            subject_ids = cert_obj.subject.get_attributes_for_oid(NameOID.USER_ID)
+            if not subject_ids or subject_ids[0].value != doc_id:
+                return False
+
+            cert_pub = cert_obj.public_key().public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            key_pub = key_obj.public_key().public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            return cert_pub == key_pub
+        except Exception:
+            return False
 
     def _sync_issued_certificate(self, doc_id: str, verify_arg: str, enroll_token: str) -> bool:
         """
@@ -230,8 +280,8 @@ class LoginWindow(QMainWindow):
         if payload.get("status") != "issued" or not payload.get("pem_data"):
             return False
 
-        keys_dir = self._keys_dir()
-        with open(os.path.join(keys_dir, "doctor_cert.pem"), "w", encoding="utf-8") as f:
+        cert_path, _ = self._doctor_tls_paths(doc_id)
+        with open(cert_path, "w", encoding="utf-8") as f:
             f.write(payload["pem_data"])
         return True
 
@@ -356,7 +406,8 @@ class LoginWindow(QMainWindow):
         form_layout.addSpacing(8)
 
         self.msg_container = QWidget()
-        self.msg_container.setFixedHeight(30)
+        self.msg_container.setMinimumHeight(64)
+        self.msg_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         msg_layout = QVBoxLayout(self.msg_container)
         msg_layout.setContentsMargins(0, 0, 0, 0)
         msg_layout.setSpacing(0)
@@ -368,6 +419,9 @@ class LoginWindow(QMainWindow):
         self.error_label = QLabel("")
         self.error_label.setObjectName("ErrorLabel")
         self.error_label.setAlignment(Qt.AlignCenter)
+        self.error_label.setWordWrap(True)
+        self.error_label.setMinimumHeight(40)
+        self.error_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         
         msg_layout.addWidget(self.status_label)
         msg_layout.addWidget(self.error_label)
@@ -686,13 +740,24 @@ class LoginWindow(QMainWindow):
 
     def _perform_login(self, doc_id, password):
         try:
+            current_suite = self.crypto_suite
+            other_suite = "Classical (RSA+AES)" if "Classical" not in current_suite else "PQC (Default)"
+            has_current_identity = self.vault.has_identity(doc_id, suite=current_suite)
+            has_other_identity = self.vault.has_identity(doc_id, suite=other_suite)
+            if has_other_identity and not has_current_identity:
+                raise Exception(
+                    "Credential suite mismatch for this device. "
+                    f"This account has a local {other_suite} identity, while app is running in {current_suite}. "
+                    "Switch suite or re-enroll for the active suite."
+                )
+
             self.audit.info("Login verify request sent for doctor_id=%s", doc_id)
             verify_arg = self._prepare_tls_material()
             enroll_token, doctor_name = self._request_enroll_token(doc_id, password, verify_arg)
             self.audit.info("Login verify accepted for doctor_id=%s", doc_id)
 
             try:
-                private_key = self.vault.load_identity(doc_id, password)
+                private_key = self.vault.load_identity(doc_id, password, suite=self.crypto_suite)
             except ValueError:
                 private_key = None
                 self.audit.info("Local vault password mismatch for doctor_id=%s", doc_id)
@@ -717,30 +782,43 @@ class LoginWindow(QMainWindow):
                     if not ok or not old_local_password:
                         raise Exception("Local vault migration cancelled.")
 
-                    self.vault.change_password(doc_id, old_local_password, password)
-                    private_key = self.vault.load_identity(doc_id, password)
+                    self.vault.change_password(doc_id, old_local_password, password, suite=self.crypto_suite)
+                    private_key = self.vault.load_identity(doc_id, password, suite=self.crypto_suite)
                     
                     if not private_key:
                         raise Exception("Local vault migration failed.")
                 else:
-                    self.vault.delete_identity(doc_id)
-                    self._clear_local_tls_assets()
+                    self.vault.delete_identity(doc_id, suite=self.crypto_suite)
+                    self._clear_local_tls_assets(doc_id)
 
             if private_key:
-                self.audit.info("Login using existing local ML-DSA identity for doctor_id=%s", doc_id)
+                self.audit.info("Login using existing local suite identity for doctor_id=%s suite=%s", doc_id, self.crypto_suite)
                 if not self._sync_issued_certificate(doc_id, verify_arg, enroll_token):
                     raise Exception(
                         "No active certificate available for this doctor. "
                         "Ask Admin to issue/refresh certificate, then sign in again."
                     )
-                self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, private_key, enroll_token))
-                return
+                if self._tls_assets_valid_for_doctor(doc_id):
+                    self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, private_key, enroll_token))
+                    return
+                self.audit.warning(
+                    "Local TLS assets invalid or mismatched for doctor_id=%s; forcing re-enrollment",
+                    doc_id,
+                )
+                self.status_label.setText("Refreshing secure identity...")
+                self._clear_local_tls_assets(doc_id)
+                # Continue to onboarding flow below using the same suite identity.
 
-            self.status_label.setText("Generating Quantum-Secure Identities...")
+            self.status_label.setText("Generating secure identities...")
             QApplication.processEvents()
 
-            agent_temp = SecurityAgent(log_callback=print, status_callback=print)
-            pqc_priv = agent_temp.signer.get_private_bytes()
+            agent_temp = SecurityAgent(
+                log_callback=print,
+                status_callback=print,
+                loaded_private_key=private_key,
+                crypto_suite=self.crypto_suite,
+            )
+            pqc_priv = private_key if private_key else agent_temp.signer.get_private_bytes()
             pqc_pub = agent_temp.signer.get_public_bytes()
 
             tls_private_key = ec.generate_private_key(ec.SECP256R1())
@@ -761,15 +839,15 @@ class LoginWindow(QMainWindow):
             if onboard.status_code != 200:
                 raise Exception("Server rejected key enrollment")
 
-            self.vault.save_identity(doc_id, password, pqc_priv)
+            self.vault.save_identity(doc_id, password, pqc_priv, suite=self.crypto_suite)
 
-            keys_dir = self._keys_dir()
             tls_priv_pem = tls_private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption()
             )
-            with open(os.path.join(keys_dir, "doctor_container.key"), "wb") as f:
+            _, key_path = self._doctor_tls_paths(doc_id)
+            with open(key_path, "wb") as f:
                 f.write(tls_priv_pem)
 
             self.status_label.setText("Waiting for Administrator Approval...")
@@ -803,8 +881,8 @@ class LoginWindow(QMainWindow):
             )
 
             if resp.status_code == 200 and resp.json().get("status") == "issued":
-                keys_dir = self._keys_dir()
-                with open(os.path.join(keys_dir, "doctor_cert.pem"), "w") as f:
+                cert_path, _ = self._doctor_tls_paths(doc_id)
+                with open(cert_path, "w", encoding="utf-8") as f:
                     f.write(resp.json()["pem_data"])
                 
                 self._animate_success_state(lambda: self._animate_exit_and_launch(doc_id, pqc_priv, enroll_token))
