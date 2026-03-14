@@ -1,0 +1,119 @@
+============================================================
+VAULTQ End-to-End Testing Guide
+============================================================
+
+This guide provides a step-by-step process for testing the full VaultQ system after it has been set up using `project_setup_instructions.txt`.
+
+------------------------------------------------------------
+STARTING THE SYSTEM
+------------------------------------------------------------
+
+With the project set up and environment variables loaded:
+
+-   **Terminal 1: Start the Server**
+    -   `python -m server_app.main` (or `python3`)
+    -   The server runs on two ports:
+        -   `https://127.0.0.1:8080`: mTLS API for the doctor app.
+        -   `https://127.0.0.1:8081`: TLS-only for the admin panel and patient app.
+
+-   **Terminal 2: Start the Doctor App**
+    -   `python -m doctor_app.main` (or `python3`)
+    -   A Qt login window will appear.
+
+-   **Terminal 3: Start the Patient App**
+    -   `cd patient_app`
+    -   `npm run dev`
+
+------------------------------------------------------------
+FULL END-TO-END TESTING FLOW
+------------------------------------------------------------
+
+**Step 1: Admin - Provision a Doctor**
+1.  Open the Admin UI in your browser: `https://127.0.0.1:8081/admin`
+2.  Log in using the `VAULTQ_ADMIN_TOKEN` from your `.env` file.
+3.  Click "Generate Credentials" and enter a doctor's name.
+4.  The system will generate a Doctor ID (e.g., `doc_0fa080`) and a temporary password. Save both.
+
+**Step 2: Doctor App - First-Time Login & Enrollment**
+1.  In the doctor app login window, enter the Doctor ID and temporary password from Step 1.
+2.  On first login, the app will generate cryptographic keys and send a Certificate Signing Request (CSR) to the server.
+3.  The app will then poll the server until its certificate is issued.
+    *Note: The password encrypts the local key vault. If lost, access must be recovered by an admin.*
+
+**Step 3: Admin - Issue the Doctor's Certificate**
+1.  Return to the admin panel. The new doctor should be in a "pending" state.
+2.  Click "ISSUE CA CERT" for that doctor.
+3.  The server signs and issues the certificate. The polling doctor app will automatically download it.
+
+**Step 4: Doctor App - Verify Secure Connection**
+1.  The doctor app should now indicate that a "Secure mTLS Session Established."
+2.  If not, relaunch the app and log in again.
+
+**Step 5: Admin - Provision a Patient**
+1.  In the admin panel, go to the Patients section and click "Generate Credentials."
+2.  Enter a patient's name to generate a Patient ID and temporary password. Save both.
+
+**Step 6: Doctor App - Upload a Medical Record**
+1.  In the doctor app, enter the Patient ID from Step 5.
+2.  Select a file and click "Upload."
+3.  The app encrypts and signs the file, then sends it to the server. A success message should appear.
+
+**Step 7: Patient App - View the Record**
+1.  Open the Patient App in your browser: `https://127.0.0.1:8081/patient/`
+2.  Log in with the Patient ID and password from Step 5.
+3.  The uploaded record should be listed. Click to view it.
+4.  The document should render in the secure viewer, with a badge verifying the doctor's signature.
+
+**Step 8: Verify in Server Logs**
+-   Check the server's terminal output for `file_recovered=True` to confirm the document was successfully decrypted for the patient.
+
+------------------------------------------------------------
+ADDITIONAL TESTING SCENARIOS
+------------------------------------------------------------
+
+-   **Password Change (Doctor):** Use the password change feature in the doctor app and verify you can log in with the new password.
+-   **Certificate Revocation:** Revoke a doctor's certificate from the admin panel. The doctor app should fail to connect. The admin can then issue a new one.
+-   **Access Recovery (Forgotten Password):** Use "Recover Access" in the admin panel. The doctor must delete their local vault file (`doctor_app/storage/keystore/<doctor_id>.vault`) and re-enroll.
+
+------------------------------------------------------------
+KEY STORAGE LOCATIONS
+------------------------------------------------------------
+
+-   Server Database: `server_app/storage/hospital_vault.json`
+-   Server Master Key: `server_app/storage/keys/master_key.json`
+-   Encrypted Patient Records: `server_app/storage/vault/<patient_id>/`
+-   Server Audit Log: `server_app/storage/logs/server_audit.log`
+-   Hospital Root CA: `server_app/storage/certs/hospital_root_ca.pem`
+-   Doctor Identity Vault: `doctor_app/storage/keystore/<doctor_id>.vault`
+-   Doctor TLS Certificate: `doctor_app/storage/keys/doctor_cert.pem`
+
+------------------------------------------------------------
+TROUBLESHOOTING
+------------------------------------------------------------
+
+-   **Doctor App: "No secure mTLS session"**: Certificate not yet issued. Issue it from the admin panel.
+-   **Doctor App: "Remote end closed connection"**: Certificate revoked or expired. Refresh it from the admin panel.
+-   **Patient App: Document not rendering**: The record may have been uploaded with a previous, incompatible version of the app. Upload a new record.
+-   **Admin Panel: 401 on login**: Incorrect admin token. Verify the `VAULTQ_ADMIN_TOKEN` in your `.env` file.
+
+------------------------------------------------------------
+CLEAN RESET (START FRESH)
+------------------------------------------------------------
+
+To wipe all state and start over, run the following commands from the project root:
+
+```bash
+# Remove server state
+rm -f server_app/storage/hospital_vault.json
+rm -rf server_app/storage/vault/
+rm -rf server_app/storage/keys/
+rm -rf server_app/storage/logs/
+rm -rf server_app/storage/certs/hospital_root_ca*
+
+# Remove doctor app state
+rm -rf doctor_app/storage/keystore/
+rm -rf doctor_app/storage/keys/doctor_cert.pem
+rm -rf doctor_app/storage/keys/doctor_container.key
+rm -rf doctor_app/logs/
+```
+After resetting, you will need to regenerate the server's TLS certificate as described in `project_setup_instructions.txt`.

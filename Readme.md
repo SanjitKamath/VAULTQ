@@ -100,6 +100,43 @@ This design ensures compromise of transport security does not expose stored pati
 
 ---
 
+### 4️⃣ Patient Pre-Enrollment & Record Viewing
+
+VaultQ includes a secure, web-based patient portal for viewing medical records. This workflow ensures that only the intended patient can decrypt and view their data, while still verifying the doctor's signature.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin
+    participant Server as Server
+    actor Patient
+    participant Client as Patient App (Browser)
+
+    Admin->>Server: Provision Patient (Name)
+    Server-->>Admin: Returns Temp Patient ID & Password
+    Admin->>Patient: Securely transmits credentials offline
+
+    Patient->>Client: Enters ID & Password to log in
+    Client->>Server: Authenticates and requests records list
+
+    Server->>Server: Fetches encrypted record list for patient
+    Server-->>Client: Delivers encrypted record metadata
+
+    Client->>Patient: Displays list of available records
+    Patient->>Client: Selects a record to view
+    Client->>Server: Requests the specific encrypted record
+
+    Server->>Server: Retrieves record, decrypts DEK with Master Key, re-encrypts DEK for patient
+    Server-->>Client: Delivers encrypted record and re-encrypted DEK
+
+    Client->>Client: Decrypts DEK with key derived from patient password
+    Client->>Client: Decrypts record content with DEK
+    Client->>Client: Verifies doctor's ML-DSA signature
+    Client->>Patient: Renders verified record in a secure viewer
+```
+
+---
+
 ## 🗄️ Data Storage Architecture
 
 VaultQ enforces strong segmentation and integrity checks at rest:
@@ -135,39 +172,47 @@ Lightweight JSON store tracking:
 
 ### Backend
 
-* FastAPI / Uvicorn (Python)
+*   FastAPI / Uvicorn (Python)
+*   Google Cloud Storage (for scalable, secure vault storage)
 
-### Desktop Client
+### Desktop Client (Doctor App)
 
-* CustomTkinter (Python)
+*   PySide6 (Python)
+
+### Web Client (Patient App)
+
+*   React / Vite
+*   TypeScript
+*   TailwindCSS
 
 ### Classical Cryptography
 
-* `cryptography` (AES-GCM, ECDSA, X.509, AES Key Wrap)
+*   `cryptography` (AES-GCM, ECDSA, X.509, AES Key Wrap)
 
 ### Post-Quantum Cryptography
 
-* `dilithium-py` (ML-DSA-65)
+*   `mlkem` (ML-KEM/Kyber for Key Encapsulation)
+*   `dilithium-py` (ML-DSA for Digital Signatures)
 
 ### Password Hashing
 
-* `passlib[bcrypt]`
+*   `passlib[bcrypt]`
 
 ### Admin Dashboard
 
-* HTML5
-* TailwindCSS
-* Alpine.js
+*   HTML5
+*   TailwindCSS
+*   Alpine.js
 
 ---
 
 ## ✅ Key Security Guarantees
 
-* End-to-end cryptographic identity with mTLS
-* Quantum-resistant integrity and non-repudiation
-* Strong envelope encryption for data in transit and at rest
-* Tamper detection for stored medical records
-* Segmented storage to reduce breach blast radius
+*   End-to-end cryptographic identity with mTLS
+*   Quantum-resistant integrity and non-repudiation
+*   Strong envelope encryption for data in transit and at rest
+*   Tamper detection for stored medical records
+*   Segmented storage to reduce breach blast radius
 
 ---
 

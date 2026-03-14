@@ -1,103 +1,189 @@
 ============================================================
-VaultQ Setup + Developer Instructions (Clean Version)
+VaultQ Setup + Developer Instructions
 ============================================================
 
-1) PREREQUISITES
-------------------------------------------------------------
-Install these once:
+This guide provides instructions for setting up and running the VaultQ project on different operating systems.
 
-- Python 3.11 (recommended)
+------------------------------------------------------------
+WINDOWS SETUP
+------------------------------------------------------------
+
+**1. Prerequisites**
+-------------------
+Install the following tools:
+- Python 3.11 or higher (https://www.python.org/downloads/)
+- Git (https://git-scm.com/download/win)
+- Node.js (https://nodejs.org/en/download/)
+- Visual C++ Build Tools (Required for some Python packages. Can be installed with Visual Studio Installer)
+
+**2. Project Setup**
+-------------------
+1.  **Clone the repository:**
+    ```powershell
+    git clone <your-repository-url>
+    cd VAULTQ
+    ```
+
+2.  **Set up the Python backend:**
+    - Create and activate a virtual environment:
+      ```powershell
+      python -m venv .venv
+      .\.venv\Scripts\Activate.ps1
+      ```
+    - Install Python dependencies:
+      ```powershell
+      python -m pip install --upgrade pip
+      pip install -r security_suite\requirements_security.txt -r doctor_app\requirements_doctor.txt -r server_app\requirements_server.txt
+      ```
+
+3.  **Set up the Patient App frontend:**
+    - Navigate to the `patient_app` directory and install dependencies:
+      ```powershell
+      cd patient_app
+      npm install
+      cd ..
+      ```
+
+**3. TLS Certificate Generation**
+--------------------------------
+For local HTTPS, generate self-signed certificates. Run this from the project root in PowerShell (with OpenSSL from Git available):
+
+```powershell
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes `
+  -keyout server_app/storage/certs/server.key `
+  -out server_app/storage/certs/server.crt `
+  -subj "/C=IN/O=VaultQ/OU=Dev/CN=127.0.0.1" `
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+**4. Environment Variables**
+---------------------------
+1.  Create a `.env` file in the root directory. You can copy `.env.sample`.
+2.  Add the following variables:
+    ```
+    VAULTQ_ADMIN_TOKEN=<generate_a_long_random_secret>
+    VAULTQ_SERVER_URL=https://127.0.0.1:8080
+    ```
+3.  Load the environment variables into your current PowerShell session:
+    ```powershell
+    Get-Content .env | ForEach-Object {
+      if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+      $name, $value = $_ -split '=', 2
+      Set-Item -Path "Env:$name" -Value $value.Trim()
+    }
+    ```
+    **Note:** The application does not automatically load the `.env` file. You must load the variables in your shell or configure them in your IDE's run configuration.
+
+**5. Running the System**
+------------------------
+Open three separate terminals, ensuring the Python virtual environment is activated and environment variables are loaded in each.
+
+-   **Terminal 1: Start the Server**
+    ```powershell
+    python -m server_app.main
+    ```
+
+-   **Terminal 2: Start the Doctor App**
+    ```powershell
+    python -m doctor_app.main
+    ```
+
+-   **Terminal 3: Start the Patient App**
+    ```powershell
+    cd patient_app
+    npm run dev
+    ```
+
+The Admin UI will be available at `https://127.0.0.1:8081/admin`.
+
+------------------------------------------------------------
+macOS / LINUX SETUP
+------------------------------------------------------------
+
+**1. Prerequisites**
+-------------------
+Install the following tools using your package manager (e.g., Homebrew for macOS):
+- Python 3.11 or higher
 - Git
-- (Windows) Visual C++ Build Tools
-  Required if bcrypt / cryptography wheels need to be built
+- Node.js
+- OpenSSL
 
+**2. Project Setup**
+-------------------
+1.  **Clone the repository:**
+    ```bash
+    git clone <your-repository-url>
+    cd VAULTQ
+    ```
 
-2) CLONE AND CREATE VIRTUAL ENVIRONMENT
-------------------------------------------------------------
-From repo root (VAULTQ_Backup):
+2.  **Set up the Python backend:**
+    - Create and activate a virtual environment:
+      ```bash
+      python3 -m venv .venv
+      source .venv/bin/activate
+      ```
+    - Install Python dependencies:
+      ```bash
+      python3 -m pip install --upgrade pip
+      pip install -r security_suite/requirements_security.txt -r doctor_app/requirements_doctor.txt -r server_app/requirements_server.txt
+      ```
 
-  python -m venv .venv
-  .\.venv\Scripts\Activate.ps1
-  python -m pip install --upgrade pip
-  pip install -r security_suite\requirements_security.txt
-  pip install -r server_app\requirements_server.txt
-  pip install -r doctor_app\requirements_doctor.txt
+3.  **Set up the Patient App frontend:**
+    - Navigate to the `patient_app` directory and install dependencies:
+      ```bash
+      cd patient_app
+      npm install
+      cd ..
+      ```
 
+**3. TLS Certificate Generation**
+--------------------------------
+For local HTTPS, generate self-signed certificates. Run this from the project root:
 
-3) GENERATING SELF-SIGNED TLS CERTIFICATES
-------------------------------------------------------------
-Local HTTPS requires `server.crt` and `server.key` so VAULTQ_SERVER_URL can stay on
-`https://127.0.0.1:8080`, and admin login via VAULTQ_ADMIN_TOKEN happens over TLS.
+```bash
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+  -keyout server_app/storage/certs/server.key \
+  -out server_app/storage/certs/server.crt \
+  -subj "/C=IN/O=VaultQ/OU=Dev/CN=127.0.0.1" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
 
-From repo root (PowerShell / Git Bash with openssl available):
+**4. Environment Variables**
+---------------------------
+1.  Create a `.env` file in the root directory.
+2.  Add the following variables:
+    ```
+    VAULTQ_ADMIN_TOKEN=<generate_a_long_random_secret>
+    VAULTQ_SERVER_URL=https://127.0.0.1:8080
+    ```
+3.  Load the environment variables. Add this to your shell profile (e.g., `~/.bashrc`, `~/.zshrc`) or run it in your current session:
+    ```bash
+    export $(grep -v '^#' .env | xargs)
+    ```
+    **Note:** The application does not automatically load the `.env` file. You must export the variables in your shell or configure them in your IDE's run configuration.
 
-    & C:\Program Files\Git\usr\bin\openssl.exe" version
+**5. Running the System**
+------------------------
+Open three separate terminals, ensuring the Python virtual environment is activated and environment variables are exported in each.
 
-    & "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes `
-  >>   -keyout server_app/storage/certs/server.key `
-  >>   -out server_app/storage/certs/server.crt `
-  >>   -subj "/C=IN/O=VaultQ/OU=Dev/CN=127.0.0.1" `
-  >>   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+-   **Terminal 1: Start the Server**
+    ```bash
+    python3 -m server_app.main
+    ```
 
-Optional helper script (`gen-certs.sh`):
+-   **Terminal 2: Start the Doctor App**
+    ```bash
+    python3 -m doctor_app.main
+    ```
 
-  #!/usr/bin/env bash
-  set -euo pipefail
-  mkdir -p server_app/storage/certs
-  openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
-    -keyout server_app/storage/certs/server.key \
-    -out server_app/storage/certs/server.crt \
-    -subj "/C=IN/O=VaultQ/OU=Dev/CN=127.0.0.1" \
-    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+-   **Terminal 3: Start the Patient App**
+    ```bash
+    cd patient_app
+    npm run dev
+    ```
 
+The Admin UI will be available at `https://127.0.0.1:8081/admin`.
 
-4) ENVIRONMENT SETUP (IMPORTANT)
-------------------------------------------------------------
-Create .env from .env.sample and set values:
-
-  VAULTQ_ADMIN_TOKEN = long random secret
-  VAULTQ_SERVER_URL = https://127.0.0.1:8080
-
-PowerShell example for current terminal session:
-
-  Get-Content .env | ForEach-Object {
-    if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
-    $name, $value = $_ -split '=', 2
-    Set-Item -Path "Env:$name" -Value $value
-  }
-
-NOTE:
-- The code does NOT auto-load .env.
-- Variables must be exported in the shell or configured in your IDE run config.
-
-SECURITY NOTE:
-- Your checked-in .env currently contains a real token.
-- Rotate it immediately.
-- Keep only .env.sample in version control.
-
-
-5) RUN THE SYSTEM
-------------------------------------------------------------
-Open two terminals.
-Both must have:
-- virtual environment activated
-- environment variables loaded
-
-Start server:
-
-  python -m server_app.main
-
-Start doctor desktop app:
-
-  python -m doctor_app.main
-
-Admin UI:
-  https://127.0.0.1:8080/admin
-
-
-6) FIRST-TIME ONBOARDING FLOW
-------------------------------------------------------------
-1. In Admin UI:
    - Provision doctor (name)
    - Receive doctor_id + temporary password
 
@@ -181,7 +267,22 @@ Notes for windows setup:
 
 vault-sa-key.json (create a file and use its path in the google app credentials while running admin) :
 
------contact abhinav for the json file, will send it then
+Syntax:
+```json
+{
+  "type": "<<acount type e.g service_account>>",
+  "project_id": "<<Enter a random project id>>",
+  "private_key_id": "<<Enter a private key id>>",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n<<Enter your private key here>>\n-----END PRIVATE KEY-----\n",
+  "client_email": "v<<Enter client email>>",
+  "client_id": "<<Give a unique client id>>",
+  "auth_uri": "<<Enter authentication URI>>",
+  "token_uri": "<<Enter token URI>>",
+  "auth_provider_x509_cert_url": "<<Enter certificate URL provider>>",
+  "client_x509_cert_url": "<<Enter certificate URL>>",
+  "universe_domain": <<Enter universe domain>>"
+}
+```
 
 Admin:
 
