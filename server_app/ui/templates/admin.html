@@ -52,11 +52,10 @@
         }
 
         .admin-card:hover{
-        transform:translateY(-3px);
         box-shadow:
-        0 16px 40px rgba(0,0,0,.45),
+        0 12px 35px rgba(0,0,0,.4),
         0 1px 0 rgba(255,255,255,.05) inset;
-        border-color:rgba(148,163,184,.25);
+        border-color:rgba(148,163,184,.18);
         }
 
 
@@ -167,8 +166,7 @@
         }
 
         .table-row:hover{
-        background:rgba(148,163,184,.06);
-        transform:scale(1.005);
+        background:rgba(148,163,184,.04);
         }
 
 
@@ -233,19 +231,17 @@
         }
 
         .picker-button{
-        background:linear-gradient(135deg,rgba(15,23,42,.95),rgba(15,23,42,.6));
-        border:1px solid #334155;
-        border-radius:14px;
-        padding:10px 12px;
+        background:#000;
+        border:1px solid #374151;
+        border-radius:10px;
+        padding:12px 14px;
         color:#e2e8f0;
-        font-size:13px;
-        transition:transform .2s ease, box-shadow .2s ease, border .2s ease;
+        font-size:15px;
+        transition:border-color .2s ease, box-shadow .2s ease;
         }
 
         .picker-button:hover{
-        transform:translateY(-1px);
         border-color:#f59e0b;
-        box-shadow:0 10px 24px rgba(245,158,11,.2);
         }
 
         .picker-dropdown{
@@ -349,12 +345,287 @@
         padding:6px 4px 4px 2px;
         }
 
+        /* Entrance animations */
+
+        @keyframes slideUp{
+        from{opacity:0;transform:translateY(12px)}
+        to{opacity:1;transform:translateY(0)}
+        }
+
+        @keyframes fadeIn{
+        from{opacity:0}
+        to{opacity:1}
+        }
+
+        .anim-enter{
+        animation:slideUp .4s ease both;
+        }
+
+        .anim-enter-1{animation-delay:.05s}
+        .anim-enter-2{animation-delay:.1s}
+        .anim-enter-3{animation-delay:.15s}
+
+        /* Stat strip — compact inline badges */
+
+        .stat-strip{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        }
+
+        .stat-chip{
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        padding:6px 16px;
+        border-radius:999px;
+        background:rgba(15,23,42,.6);
+        border:1px solid rgba(148,163,184,.1);
+        font-size:13px;
+        color:#94a3b8;
+        transition:border-color .2s ease;
+        }
+
+        .stat-chip:hover{
+        border-color:rgba(245,158,11,.2);
+        }
+
+        .stat-chip .stat-val{
+        font-weight:700;
+        color:#e2e8f0;
+        }
+
+        /* Custom select styling */
+
+        .apt-select{
+        appearance:none;
+        -webkit-appearance:none;
+        background:#000 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1.5l5 5 5-5' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 14px center;
+        border:1px solid #374151;
+        border-radius:10px;
+        padding:14px 38px 14px 16px;
+        font-size:15px;
+        color:#fff;
+        width:100%;
+        transition:border-color .2s ease, box-shadow .2s ease;
+        }
+
+        .apt-select:focus{
+        outline:none;
+        border-color:#f59e0b;
+        box-shadow:0 0 0 2px rgba(245,158,11,.15);
+        }
+
+        .apt-select option{
+        background:#0f172a;
+        color:#e2e8f0;
+        }
+
+        /* Pill buttons for table actions */
+
+        .pill-btn{
+        display:inline-flex;
+        align-items:center;
+        padding:6px 16px;
+        border-radius:999px;
+        font-size:12px;
+        font-weight:700;
+        letter-spacing:.03em;
+        text-transform:uppercase;
+        transition:all .2s ease;
+        }
+
+        .pill-btn-amber{
+        color:#f59e0b;
+        border:1.5px solid rgba(245,158,11,.3);
+        background:transparent;
+        }
+
+        .pill-btn-amber:hover{
+        background:rgba(245,158,11,.1);
+        border-color:#f59e0b;
+        }
+
+        .pill-btn-red{
+        color:#ef4444;
+        border:1.5px solid rgba(239,68,68,.25);
+        background:transparent;
+        }
+
+        .pill-btn-red:hover{
+        background:rgba(239,68,68,.1);
+        border-color:#ef4444;
+        }
+
+        /* Status badge */
+
+        .status-badge{
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        padding:5px 14px;
+        border-radius:999px;
+        font-size:12px;
+        font-weight:600;
+        letter-spacing:.02em;
+        }
+
+        .status-badge::before{
+        content:'';
+        width:6px;
+        height:6px;
+        border-radius:50%;
+        flex-shrink:0;
+        }
+
+        .status-badge.status-active{
+        background:rgba(34,197,94,.1);
+        color:#4ade80;
+        border:1px solid rgba(34,197,94,.2);
+        }
+
+        .status-badge.status-active::before{
+        background:#4ade80;
+        box-shadow:0 0 6px rgba(74,222,128,.6);
+        }
+
+        .status-badge.status-upcoming{
+        background:rgba(245,158,11,.08);
+        color:#fbbf24;
+        border:1px solid rgba(245,158,11,.15);
+        }
+
+        .status-badge.status-upcoming::before{
+        background:#fbbf24;
+        }
+
+        .status-badge.status-expired{
+        background:rgba(100,116,139,.06);
+        color:#64748b;
+        border:1px solid rgba(100,116,139,.1);
+        }
+
+        .status-badge.status-expired::before{
+        background:#475569;
+        }
+
+        /* Create appointment button */
+
+        .btn-create-apt{
+        background:#d97706;
+        color:#fff;
+        font-weight:700;
+        font-size:14px;
+        padding:14px 32px;
+        border-radius:10px;
+        transition:all .2s ease;
+        }
+
+        .btn-create-apt:hover{
+        background:#f59e0b;
+        }
+
+        /* Nav buttons in calendar */
+
+        .cal-nav-btn{
+        padding:6px 14px;
+        border-radius:8px;
+        background:rgba(148,163,184,.06);
+        border:1px solid rgba(148,163,184,.1);
+        color:#cbd5e1;
+        font-size:13px;
+        font-weight:500;
+        transition:all .2s ease;
+        }
+
+        .cal-nav-btn:hover{
+        background:rgba(245,158,11,.08);
+        border-color:rgba(245,158,11,.25);
+        color:#fbbf24;
+        }
+
+        /* Past time pill style */
+
+        .time-pill.is-past{
+        opacity:.25;
+        text-decoration:line-through;
+        cursor:not-allowed;
+        pointer-events:none;
+        }
+
+        /* Appointment row stagger */
+
+        .apt-row{
+        animation:fadeIn .3s ease both;
+        }
+
+        /* Toast notification */
+
+        .toast-container{
+        position:fixed;
+        top:80px;
+        right:24px;
+        z-index:60;
+        pointer-events:none;
+        }
+
+        .toast{
+        pointer-events:auto;
+        padding:14px 20px;
+        border-radius:12px;
+        font-size:14px;
+        font-weight:500;
+        max-width:380px;
+        box-shadow:0 8px 30px rgba(0,0,0,.4);
+        animation:toastIn .35s ease;
+        }
+
+        .toast-success{
+        background:rgba(5,150,105,.15);
+        border:1px solid rgba(16,185,129,.3);
+        color:#6ee7b7;
+        }
+
+        .toast-info{
+        background:rgba(245,158,11,.1);
+        border:1px solid rgba(245,158,11,.25);
+        color:#fcd34d;
+        }
+
+        @keyframes toastIn{
+        from{opacity:0;transform:translateX(20px)}
+        to{opacity:1;transform:translateX(0)}
+        }
+
+        /* Form section label */
+
+        .form-label{
+        display:block;
+        font-size:12px;
+        font-weight:500;
+        color:#9ca3af;
+        text-transform:uppercase;
+        letter-spacing:.05em;
+        margin-bottom:14px;
+        }
+
         </style>
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans antialiased min-h-screen flex flex-col selection:bg-cyan-500/30">
 
     <div class="flex-1 flex flex-col" x-data="adminApp()">
-        
+
+        <!-- Toast Notification -->
+        <div class="toast-container" x-show="toastVisible" x-cloak
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0">
+            <div class="toast" :class="toastType === 'success' ? 'toast-success' : 'toast-info'" x-text="toastMessage"></div>
+        </div>
+
         <header class="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-6 py-4 flex justify-between items-center shadow-sm">
             <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center shadow-md">
@@ -373,7 +644,9 @@
                     </span>
                 </div>
                 <button @click="logout()"
-                        class="text-red-400 hover:text-red-300 font-bold text-xs transition-colors">
+                        class="ml-4 text-xs font-bold px-3 py-1 rounded transition"
+                        style="background:#dc2626;color:#fff"
+                        onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='#dc2626'">
                     LOGOUT
                 </button>
             </div>
@@ -602,48 +875,52 @@
                          x-transition:enter-end="opacity-100 translate-y-0"
                          style="display: none;">
 
-                        <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
-                            <h3 class="text-xl font-bold mb-4 text-amber-400">Schedule Appointment</h3>
-                            <p class="text-gray-400 text-sm mb-4">Appointments gate doctor uploads for 24 hours after the appointment time.</p>
+                        <!-- Schedule Form -->
+                        <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl anim-enter anim-enter-1">
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                                <h3 class="text-xl font-bold text-amber-400">Schedule Appointment</h3>
+                                <div class="stat-strip">
+                                    <span class="stat-chip"><span class="stat-val" x-text="appointments.length">0</span> total</span>
+                                    <span class="stat-chip"><span class="stat-val text-emerald-400" x-text="appointments.filter(a => getAppointmentStatus(a) === 'active').length">0</span> active</span>
+                                    <span class="stat-chip"><span class="stat-val text-amber-400" x-text="appointments.filter(a => getAppointmentStatus(a) === 'upcoming').length">0</span> upcoming</span>
+                                </div>
+                            </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <p class="text-gray-400 text-sm mb-8">Appointments gate doctor uploads for 24 hours after the scheduled time.</p>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4" style="row-gap:40px;margin-bottom:36px">
                                 <div>
-                                    <label class="text-xs text-gray-400 uppercase">Doctor</label>
-                                    <select x-model="newAppointment.doctor_id" class="bg-black border border-gray-700 p-3 rounded-lg w-full text-white focus:border-amber-500 outline-none">
+                                    <label class="form-label">Doctor</label>
+                                    <select x-model="newAppointment.doctor_id" class="apt-select">
                                         <option value="">Select doctor</option>
                                         <template x-for="doc in doctors" :key="doc.id">
-                                            <option :value="doc.id" x-text="doc.id + ' - ' + doc.name"></option>
+                                            <option :value="doc.id" x-text="doc.name + ' (' + doc.id + ')'"></option>
                                         </template>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="text-xs text-gray-400 uppercase">Patient</label>
-                                    <select x-model="newAppointment.patient_id" class="bg-black border border-gray-700 p-3 rounded-lg w-full text-white focus:border-amber-500 outline-none">
+                                    <label class="form-label">Patient</label>
+                                    <select x-model="newAppointment.patient_id" class="apt-select">
                                         <option value="">Select patient</option>
                                         <template x-for="pat in patients" :key="pat.id">
-                                            <option :value="pat.id" x-text="pat.id + ' - ' + pat.name"></option>
+                                            <option :value="pat.id" x-text="pat.name + ' (' + pat.id + ')'"></option>
                                         </template>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="text-xs text-gray-400 uppercase">Appointment Time</label>
+                                    <label class="form-label">Time (IST)</label>
                                     <button type="button" @click="openPicker('create')" class="picker-button w-full text-left">
                                         <div class="picker-dropdown">
                                             <div>
-                                                <span class="text-[10px] text-slate-400 uppercase block">Set time (IST)</span>
-                                                <span class="text-sm" x-text="appointmentDisplay || 'Select appointment time'"></span>
+                                                <span class="text-sm" :class="appointmentDisplay ? 'text-slate-200' : 'text-slate-500'" x-text="appointmentDisplay || 'Pick date & time'"></span>
                                             </div>
                                             <span class="picker-chip">Pick</span>
                                         </div>
                                     </button>
+                                    <button @click="createAppointment()" class="btn-create-apt" style="margin-top:20px;width:100%">
+                                        Create Appointment
+                                    </button>
                                 </div>
-                            </div>
-
-                            <div class="mt-6">
-                                <button @click="createAppointment()"
-                                        class="bg-amber-600 px-8 py-3 rounded-lg font-bold hover:bg-amber-500 transition-all">
-                                    Create Appointment
-                                </button>
                             </div>
                         </div>
 
@@ -655,14 +932,14 @@
                              x-transition:leave="transition ease-in duration-150"
                              x-transition:leave-start="opacity-100"
                              x-transition:leave-end="opacity-0"
-                             class="fixed inset-0 z-50 flex items-center justify-center">
+                             class="fixed inset-0 z-50 flex items-center justify-center"
+                             style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:50">
                             <div class="absolute inset-0 modal-backdrop" @click="closePicker()"></div>
                             <div class="modal-card relative w-[92%] max-w-4xl p-6">
                                 <div class="flex items-center justify-between mb-5">
                                     <div>
-                                        <h3 class="text-lg font-bold text-amber-300" x-text="pickerMode === 'edit' ? 'Edit Appointment Time (IST)' : 'Set Appointment Time (IST)'"></h3>
-                                        <p class="text-xs text-slate-400">Pick a date and time in IST. Past times are blocked.</p>
-                                        <p class="text-xs text-slate-500" x-text="newAppointment.doctor_id && newAppointment.patient_id ? 'Doctor: ' + newAppointment.doctor_id + ' | Patient: ' + newAppointment.patient_id : ''"></p>
+                                        <h3 class="text-lg font-bold text-amber-300" x-text="pickerMode === 'edit' ? 'Edit Appointment Time (IST)' : 'Pick Date & Time'"></h3>
+                                        <p class="text-xs text-slate-400">IST timezone. Past slots are greyed out.</p>
                                     </div>
                                     <button @click="closePicker()" class="text-slate-400 hover:text-slate-200">Close</button>
                                 </div>
@@ -670,9 +947,9 @@
                                 <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_.8fr] gap-6">
                                     <div>
                                         <div class="calendar-header mb-4">
-                                            <button @click="shiftMonth(-1)" class="text-slate-300 hover:text-white">Prev</button>
+                                            <button @click="shiftMonth(-1)" class="cal-nav-btn">Prev</button>
                                             <div class="text-sm font-semibold" x-text="pickerMonthLabel"></div>
-                                            <button @click="shiftMonth(1)" class="text-slate-300 hover:text-white">Next</button>
+                                            <button @click="shiftMonth(1)" class="cal-nav-btn">Next</button>
                                         </div>
                                         <div class="calendar-weekdays text-[10px] tracking-widest text-slate-500 uppercase">
                                             <span class="text-center">Mo</span>
@@ -704,7 +981,7 @@
                                             <template x-for="slot in timeSlots" :key="slot.label">
                                                 <button type="button"
                                                         class="time-pill"
-                                                        :class="{ 'is-selected': pickerTime === slot.label, 'opacity-40 cursor-not-allowed': slot.disabled }"
+                                                        :class="{ 'is-selected': pickerTime === slot.label, 'is-past': slot.past, 'opacity-40 cursor-not-allowed': slot.disabled && !slot.past }"
                                                         :disabled="slot.disabled"
                                                         @click="slot.disabled ? null : (pickerTime = slot.label)">
                                                     <span x-text="slot.label"></span>
@@ -713,7 +990,9 @@
                                         </div>
                                         <div x-show="pickerError" class="mt-4 text-xs text-red-400" x-text="pickerError"></div>
                                         <div class="mt-6 flex items-center justify-between">
-                                            <div class="text-xs text-slate-400">Saved in IST timezone</div>
+                                            <div class="text-xs text-slate-400">
+                                                <span x-show="pickerDay" x-text="'Selected: ' + String(pickerDay).padStart(2,'0') + '/' + String(pickerMonth).padStart(2,'0') + '/' + pickerYear + ' ' + pickerTime + ' IST'"></span>
+                                            </div>
                                             <div class="flex gap-3">
                                                 <button @click="closePicker()" class="admin-btn bg-slate-800 text-slate-300">Cancel</button>
                                                 <button @click="confirmPicker()" class="admin-btn btn-emerald glow-emerald" x-text="pickerMode === 'edit' ? 'Save Changes' : 'Confirm'"></button>
@@ -724,9 +1003,12 @@
                             </div>
                         </div>
 
-                        <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
+                        <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl anim-enter anim-enter-2">
                             <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-                                <h2 class="text-xl font-bold">Appointments</h2>
+                                <div class="flex items-baseline gap-3">
+                                    <h2 class="text-xl font-bold">Appointments</h2>
+                                    <span class="text-sm text-slate-500" x-text="appointments.length + ' total'"></span>
+                                </div>
                                 <button @click="refresh()" class="text-sm text-amber-500 hover:underline">Refresh</button>
                             </div>
                             <div class="overflow-x-auto">
@@ -736,22 +1018,37 @@
                                             <th class="py-4 px-4">Appointment ID</th>
                                             <th class="py-4 px-4">Doctor</th>
                                             <th class="py-4 px-4">Patient</th>
-                                            <th class="py-4 px-4">Time (IST)</th>
-                                            <th class="py-4 px-4">Expiry (IST)</th>
+                                            <th class="py-4 px-4">Schedule (IST)</th>
+                                            <th class="py-4 px-4">Status</th>
                                             <th class="py-4 px-4 text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <template x-for="apt in appointments" :key="apt.apt_id">
-                                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
+                                        <template x-for="(apt, idx) in appointments" :key="apt.apt_id">
+                                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition apt-row" :style="'animation-delay:' + (idx * 0.04) + 's'">
                                                 <td class="py-4 px-4 font-mono text-amber-400" x-text="apt.apt_id"></td>
-                                                <td class="py-4 px-4 font-mono" x-text="apt.doctor_id"></td>
-                                                <td class="py-4 px-4 font-mono" x-text="apt.patient_id"></td>
-                                                <td class="py-4 px-4" x-text="formatIst(apt.appointment_time_ist)"></td>
-                                                <td class="py-4 px-4" x-text="formatIst(apt.expires_at_ist)"></td>
+                                                <td class="py-4 px-4">
+                                                    <div class="font-bold" x-text="getDoctorName(apt.doctor_id)"></div>
+                                                    <div class="text-xs text-slate-500 font-mono" x-text="apt.doctor_id"></div>
+                                                </td>
+                                                <td class="py-4 px-4">
+                                                    <div class="font-bold" x-text="getPatientName(apt.patient_id)"></div>
+                                                    <div class="text-xs text-slate-500 font-mono" x-text="apt.patient_id"></div>
+                                                </td>
+                                                <td class="py-4 px-4">
+                                                    <div x-text="formatIst(apt.appointment_time_ist)"></div>
+                                                    <div class="text-xs text-slate-500" x-text="'Expires: ' + formatIst(apt.expires_at_ist)"></div>
+                                                </td>
+                                                <td class="py-4 px-4">
+                                                    <span class="status-badge"
+                                                          :class="'status-' + getAppointmentStatus(apt)"
+                                                          x-text="getAppointmentStatus(apt).charAt(0).toUpperCase() + getAppointmentStatus(apt).slice(1)"></span>
+                                                </td>
                                                 <td class="py-4 px-4 text-right">
-                                                    <button @click="startEditAppointment(apt)" class="text-xs text-amber-300 hover:text-amber-200 font-bold mr-6">EDIT</button>
-                                                    <button @click="deleteAppointment(apt.apt_id)" class="text-xs text-red-500 hover:text-red-400 font-bold">DELETE</button>
+                                                    <div class="flex items-center justify-end gap-3">
+                                                        <button @click="startEditAppointment(apt)" class="pill-btn pill-btn-amber">Edit</button>
+                                                        <button @click="deleteAppointment(apt.apt_id)" class="pill-btn pill-btn-red">Delete</button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         </template>
@@ -800,6 +1097,16 @@
                 timeSlots: [],
                 selectedTimeDisplay: '',
                 editAppointmentId: '',
+                toastMessage: '',
+                toastType: 'success',
+                toastVisible: false,
+
+                showToast(message, type = 'success') {
+                    this.toastMessage = message;
+                    this.toastType = type;
+                    this.toastVisible = true;
+                    setTimeout(() => { this.toastVisible = false; }, 3000);
+                },
 
                 async init() {
                     this.initPickerDefaults();
@@ -987,6 +1294,7 @@
                         return;
                     }
                     this.closePicker();
+                    this.showToast(`Time set: ${day}/${month}/${this.pickerYear} at ${this.pickerTime} IST`, 'info');
                 },
 
                 shiftMonth(delta) {
@@ -1054,16 +1362,18 @@
                     const slots = this.buildTimeSlots();
                     const doctorId = this.newAppointment.doctor_id;
                     const [year, month, day] = [this.pickerYear, this.pickerMonth, this.pickerDay];
+                    const nowMs = Date.now();
                     this.timeSlots = slots.map(slot => {
                         const [hour, minute] = slot.split(':').map(Number);
                         const slotMs = this.istToUtcMs(year, month, day, hour, minute);
-                        const conflict = doctorId && this.appointments.some(apt => {
+                        const isPast = slotMs < nowMs;
+                        const conflict = !isPast && doctorId && this.appointments.some(apt => {
                             if (apt.doctor_id !== doctorId) return false;
                             if (this.editAppointmentId && apt.apt_id === this.editAppointmentId) return false;
                             const aptMs = Date.parse(apt.appointment_time_ist);
                             return Math.abs(aptMs - slotMs) < (30 * 60 * 1000);
                         });
-                        return { label: slot, disabled: !!conflict };
+                        return { label: slot, disabled: isPast || !!conflict, past: isPast };
                     });
                     if (this.timeSlots.length && this.timeSlots.every(s => s.disabled)) {
                         this.pickerTime = this.timeSlots[0].label;
@@ -1115,6 +1425,27 @@
                         console.error("Failed to refresh dashboard:", e);
                         alert("Network error: " + e.message);
                     }
+                },
+
+                getAppointmentStatus(apt) {
+                    if (!apt) return 'expired';
+                    const now = Date.now();
+                    const start = Date.parse(apt.appointment_time_ist);
+                    const end = Date.parse(apt.expires_at_ist);
+                    if (isNaN(start) || isNaN(end)) return 'expired';
+                    if (now >= start && now <= end) return 'active';
+                    if (now < start) return 'upcoming';
+                    return 'expired';
+                },
+
+                getDoctorName(id) {
+                    const doc = this.doctors.find(d => d.id === id);
+                    return doc ? doc.name : id;
+                },
+
+                getPatientName(id) {
+                    const pat = this.patients.find(p => p.id === id);
+                    return pat ? pat.name : id;
                 },
 
                 formatIst(value) {
@@ -1373,6 +1704,7 @@
                         this.newAppointment = { doctor_id: '', patient_id: '', appointment_time: '' };
                         this.clearPickerDisplay();
                         await this.refresh();
+                        this.showToast('Appointment created successfully', 'success');
 
                     } catch (e) {
                         alert("Network error while creating appointment: " + e.message);
@@ -1396,6 +1728,7 @@
                         }
 
                         await this.refresh();
+                        this.showToast('Appointment deleted', 'success');
 
                     } catch (e) {
                         alert("Network error while deleting appointment: " + e.message);

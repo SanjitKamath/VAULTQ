@@ -108,11 +108,15 @@ def set_patient_password(patient_id: str, payload: PatientPasswordUpdateRequest,
 @router.delete("/admin/{patient_id}")
 def delete_patient(patient_id: str, _: None = Depends(require_admin_session)):
     audit.info("Admin patient delete requested for patient_id=%s", patient_id)
-    success = db.delete_patient(patient_id)
-    if not success:
+    if patient_id not in db.patients:
         raise HTTPException(status_code=404, detail="Patient not found")
-    audit.info("Admin patient delete succeeded for patient_id=%s", patient_id)
-    return {"message": "Patient deleted successfully"}
+    vault_records_deleted = state.vault_storage.delete_patient_records(patient_id)
+    db.delete_patient(patient_id)
+    audit.info(
+        "Admin patient delete succeeded for patient_id=%s, vault_records_purged=%d",
+        patient_id, vault_records_deleted,
+    )
+    return {"message": f"Patient deleted successfully. {vault_records_deleted} vault record(s) purged."}
 
 
 # ── Patient Authentication ───────────────────────────────────────────

@@ -21,6 +21,10 @@ class VaultStorageBackend(ABC):
     def list_records(self, patient_id: str) -> list[str]:
         """Return a sorted list of record IDs (without .json extension) for a patient."""
 
+    @abstractmethod
+    def delete_patient_records(self, patient_id: str) -> int:
+        """Delete all records for a patient. Returns the number of records deleted."""
+
 
 class LocalVaultStorage(VaultStorageBackend):
     """Stores encrypted records as JSON files on the local filesystem."""
@@ -67,6 +71,22 @@ class LocalVaultStorage(VaultStorageBackend):
             if fname.endswith(".json"):
                 record_ids.append(fname.removesuffix(".json"))
         return record_ids
+
+    def delete_patient_records(self, patient_id: str) -> int:
+        patient_dir = self._patient_dir(patient_id)
+        if not os.path.isdir(patient_dir):
+            return 0
+        count = 0
+        for fname in os.listdir(patient_dir):
+            if fname.endswith(".json"):
+                os.remove(os.path.join(patient_dir, fname))
+                count += 1
+        try:
+            os.rmdir(patient_dir)
+        except OSError:
+            logger.warning("Could not remove patient directory: %s", patient_dir)
+        logger.info("LocalVaultStorage.delete_patient_records: patient_id=%s deleted=%d", patient_id, count)
+        return count
 
 
 class GCSVaultStorage(VaultStorageBackend):
@@ -118,3 +138,12 @@ class GCSVaultStorage(VaultStorageBackend):
                 if record_id:  # skip if empty after stripping
                     record_ids.append(record_id)
         return sorted(record_ids)
+
+    def delete_patient_records(self, patient_id: str) -> int:
+        prefix = f"vault/{patient_id}/"
+        count = 0
+        for blob in self._client.list_blobs(self._bucket, prefix=prefix):
+            blob.delete()
+            count += 1
+        logger.info("GCSVaultStorage.delete_patient_records: patient_id=%s deleted=%d", patient_id, count)
+        return count
