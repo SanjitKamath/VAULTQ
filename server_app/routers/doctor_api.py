@@ -1,12 +1,14 @@
 import os
 import json
 import base64
+import hashlib
 import time
+from datetime import datetime, timezone
 from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from cryptography.x509.oid import NameOID
-from datetime import timezone
+from datetime import timezone, timedelta
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -24,6 +26,7 @@ from security_suite.security.certificates import (
 )
 
 from ..core.database import db
+from ..core.appointments_db import appointments_db
 from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import verify_password, hash_password  # For secure bcrypt passwords
@@ -32,6 +35,44 @@ from ..core.ca_setup import load_hospital_ca_signer
 
 router = APIRouter(prefix="/api/doctor", tags=["Doctor Operations"])
 audit = get_audit_logger()
+
+_CERT_VALIDATION_CACHE = {}
+_CERT_VALIDATION_CACHE_MAX = 512
+
+
+def _pem_hash(pem_data: str) -> str:
+    return hashlib.sha256((pem_data or "").encode("utf-8")).hexdigest()
+
+
+def _get_cached_cert_pub(cert_candidate: dict, doctor_id: str, now_ts: float):
+    cert_id = cert_candidate.get("id")
+    if not cert_id:
+        return None
+    cached = _CERT_VALIDATION_CACHE.get(cert_id)
+    if not cached:
+        return None
+    if cached.get("doctor_id") != doctor_id:
+        return None
+    if float(cached.get("expires_at", 0) or 0) <= now_ts:
+        return None
+    if cached.get("pem_hash") != _pem_hash(cert_candidate.get("pem_data")):
+        return None
+    return cached.get("pub_key_bytes")
+
+
+def _store_cached_cert_pub(cert_candidate: dict, doctor_id: str, pub_key_bytes: bytes):
+    cert_id = cert_candidate.get("id")
+    if not cert_id:
+        return
+    _CERT_VALIDATION_CACHE[cert_id] = {
+        "doctor_id": doctor_id,
+        "expires_at": float(cert_candidate.get("expires_at", 0) or 0),
+        "pem_hash": _pem_hash(cert_candidate.get("pem_data")),
+        "pub_key_bytes": pub_key_bytes,
+        "cached_at": time.time(),
+    }
+    if len(_CERT_VALIDATION_CACHE) > _CERT_VALIDATION_CACHE_MAX:
+        _CERT_VALIDATION_CACHE.pop(next(iter(_CERT_VALIDATION_CACHE)))
 
 
 class PasswordChangeRequest(BaseModel):
@@ -112,6 +153,13 @@ def _build_legacy_record_hash_message(*, master_kid: str, timestamp: int, patien
     ).encode("utf-8")
 
 
+_IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _iso_ist(ts: int) -> str:
+    return datetime.fromtimestamp(int(ts), tz=_IST_TZ).isoformat()
+
+
 @router.get("/classical/public-key")
 def get_classical_public_key():
     """Returns server RSA public key for classical envelope DEK wrapping."""
@@ -123,6 +171,83 @@ def get_classical_public_key():
         "suite": state.crypto_suite,
         "public_key_b64": base64.b64encode(pub_bytes).decode(),
     }
+
+
+@router.get("/appointments/valid")
+def list_valid_appointments(doctor_id: str):
+    doc = db.doctors.get(doctor_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Doctor is not active")
+
+    now_ts = int(time.time())
+    rows = appointments_db.list_valid_appointments_for_doctor(doctor_id, now_ts=now_ts)
+    return {
+        "appointments": [
+            {
+                **row,
+                "patient_name": db.patients.get(row.get("patient_id"), {}).get("name", ""),
+                "appointment_time_ist": _iso_ist(row["appointment_time"]),
+                "expires_at_ist": _iso_ist(row["expires_at"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.get("/appointments/validate")
+def validate_appointment(doctor_id: str, patient_id: str):
+    doc = db.doctors.get(doctor_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Doctor is not active")
+    if patient_id not in db.patients:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    now_ts = int(time.time())
+    allowed = appointments_db.is_upload_allowed(doctor_id, patient_id, now_ts=now_ts)
+    return {"allowed": allowed, "checked_at_ist": _iso_ist(now_ts)}
+
+
+@router.get("/appointments/upcoming")
+def list_upcoming_appointments(doctor_id: str):
+    doc = db.doctors.get(doctor_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Doctor is not active")
+
+    now_ts = int(time.time())
+    rows = appointments_db.list_upcoming_appointments_for_doctor(doctor_id, now_ts=now_ts)
+    return {
+        "appointments": [
+            {
+                **row,
+                "patient_name": db.patients.get(row.get("patient_id"), {}).get("name", ""),
+                "appointment_time_ist": _iso_ist(row["appointment_time"]),
+                "expires_at_ist": _iso_ist(row["expires_at"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.get("/patients")
+def list_patients_for_doctor(doctor_id: str):
+    doc = db.doctors.get(doctor_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Doctor is not active")
+
+    patients = [
+        {"id": pat["id"], "name": pat.get("name", ""), "status": pat.get("status", "")}
+        for pat in db.get_all_patients()
+        if pat.get("status") == "active"
+    ]
+    return {"patients": patients}
 
 
 @router.post("/upload")
@@ -156,13 +281,20 @@ def receive_record(envelope: SecureEnvelope):
         
     # C. Validate Expiration and Status
     current_time = time.time()
-    active_unexpired_certs = [
-        cert
-        for cert in doctor_certs
-        if cert.get("status") == "active" and float(cert.get("expires_at", 0) or 0) > current_time
-    ]
-    # Prefer most recently expiring cert first (latest rotation).
-    active_unexpired_certs.sort(key=lambda c: float(c.get("expires_at", 0) or 0), reverse=True)
+    latest_cert = db.get_latest_active_certificate(doctor_id)
+    active_unexpired_certs = []
+    if (
+        latest_cert
+        and latest_cert.get("status") == "active"
+        and float(latest_cert.get("expires_at", 0) or 0) > current_time
+    ):
+        active_unexpired_certs.append(latest_cert)
+
+    for cert in doctor_certs:
+        if latest_cert and cert.get("id") == latest_cert.get("id"):
+            continue
+        if cert.get("status") == "active" and float(cert.get("expires_at", 0) or 0) > current_time:
+            active_unexpired_certs.append(cert)
 
     if not active_unexpired_certs:
         audit.warning("Upload rejected: no active/unexpired cert for doctor_id=%s", doctor_id)
@@ -194,6 +326,12 @@ def receive_record(envelope: SecureEnvelope):
             continue
 
         try:
+            cached_pub = _get_cached_cert_pub(cert_candidate, doctor_id, current_time)
+            if cached_pub is not None:
+                cert_bound_doctor_pub = cached_pub
+                valid_cert = cert_candidate
+                break
+
             cert_obj = load_pem_certificate(cert_pem)
             not_before = getattr(cert_obj, "not_valid_before_utc", cert_obj.not_valid_before.replace(tzinfo=timezone.utc))
             not_after = getattr(cert_obj, "not_valid_after_utc", cert_obj.not_valid_after.replace(tzinfo=timezone.utc))
@@ -221,6 +359,7 @@ def receive_record(envelope: SecureEnvelope):
 
             cert_bound_doctor_pub = extract_pqc_public_key_from_cert(cert_obj)
             valid_cert = cert_candidate
+            _store_cached_cert_pub(cert_candidate, doctor_id, cert_bound_doctor_pub)
             break
         except Exception as exc:
             last_cert_error = f"{type(exc).__name__}: {str(exc) or 'certificate validation failed'}"
@@ -374,6 +513,19 @@ def receive_record(envelope: SecureEnvelope):
     if not patient_id:
         audit.warning("Upload rejected: patient_id missing after payload parse for doctor_id=%s", doctor_id)
         raise HTTPException(status_code=400, detail="patient_id missing from payload metadata.")
+
+    now_ts = int(time.time())
+    if not appointments_db.is_upload_allowed(doctor_id, str(patient_id), now_ts=now_ts):
+        audit.warning(
+            "Upload rejected: no valid appointment doctor_id=%s patient_id=%s ts=%s",
+            doctor_id,
+            patient_id,
+            now_ts,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="No valid appointment found. Uploads are allowed only from the appointment time until 24 hours after.",
+        )
 
     # Encrypt payload for at-rest storage with server master key (legacy stored envelope format).
     stored_timestamp = int(time.time())

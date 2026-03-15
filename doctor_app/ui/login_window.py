@@ -157,6 +157,7 @@ class LoginWindow(QMainWindow):
         super().__init__()
         self.audit = get_audit_logger()
         self.audit.info("Doctor login window initialized")
+        self._session = requests.Session()
 
         self.server_url = str(config.server_url).rstrip("/")
         self.pre_enroll_url = str(config.pre_enroll_url).rstrip("/")
@@ -267,7 +268,7 @@ class LoginWindow(QMainWindow):
         Pull latest issued cert from pre-enroll endpoint and persist locally.
         Returns True when a valid cert is present locally after sync.
         """
-        resp = requests.get(
+        resp = self._session.get(
             f"{self.pre_enroll_url}/api/pre-enroll/auth/my-cert/{doc_id}",
             headers={"X-Enroll-Token": enroll_token},
             verify=verify_arg,
@@ -286,7 +287,7 @@ class LoginWindow(QMainWindow):
         return True
 
     def _request_enroll_token(self, doc_id: str, password: str, verify_arg: str) -> tuple[str, str]:
-        resp = requests.post(
+        resp = self._session.post(
             f"{self.pre_enroll_url}/api/pre-enroll/auth/verify",
             json={"id": doc_id, "password": password},
             verify=verify_arg,
@@ -692,6 +693,8 @@ class LoginWindow(QMainWindow):
 
     def reshow_for_login(self):
         """Reset login form and re-show the window for a new login session."""
+        self.is_dark_mode = self.settings.value("theme/is_dark_mode", False, type=bool)
+        self._apply_theme(self.is_dark_mode)
         self.id_entry.clear()
         self.pass_entry.clear()
         self.status_label.setText("")
@@ -713,13 +716,70 @@ class LoginWindow(QMainWindow):
         self.hide()
         sys.exit(0)
 
+    def _apply_message_box_theme(self, box: QMessageBox):
+        font_family = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        if self.is_dark_mode:
+            box.setStyleSheet(f"""
+                QMessageBox {{ background-color: #1C1C1E; color: #EBEBF5; }}
+                QLabel {{ color: #EBEBF5; font-family: {font_family}; font-size: 13px; }}
+                QPushButton {{
+                    background-color: #2C2C2E;
+                    color: #EBEBF5;
+                    border: 1px solid #3A3A3C;
+                    border-radius: 6px;
+                    padding: 6px 14px;
+                    font-family: {font_family};
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background-color: #3A3A3C; }}
+            """)
+        else:
+            box.setStyleSheet(f"""
+                QMessageBox {{ background-color: #F5F5F7; color: #1D1D1F; }}
+                QLabel {{ color: #1D1D1F; font-family: {font_family}; font-size: 13px; }}
+                QPushButton {{
+                    background-color: #FFFFFF;
+                    color: #1D1D1F;
+                    border: 1px solid #D1D1D6;
+                    border-radius: 6px;
+                    padding: 6px 14px;
+                    font-family: {font_family};
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background-color: #F2F2F7; }}
+            """)
+
+    def _show_message_box(self, kind: str, title: str, text: str, buttons: QMessageBox.StandardButtons = QMessageBox.Ok):
+        icon_map = {
+            "info": QMessageBox.Information,
+            "warning": QMessageBox.Warning,
+            "error": QMessageBox.Critical,
+            "question": QMessageBox.Question,
+        }
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setIcon(icon_map.get(kind, QMessageBox.Information))
+        box.setStandardButtons(buttons)
+        self._apply_message_box_theme(box)
+        return box.exec()
+
+    def _prompt_password(self, title: str, label: str) -> tuple[str, bool]:
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setLabelText(label)
+        dialog.setTextEchoMode(QLineEdit.Password)
+        self._apply_message_box_theme(dialog)
+        ok = dialog.exec() == QInputDialog.Accepted
+        return dialog.textValue(), ok
+
     def _on_forgot_password(self):
         self.audit.info("Forgot password triggered on login screen")
-        QMessageBox.information(
-            self,
+        self._show_message_box(
+            "info",
             "Password Recovery",
             "To maintain quantum-grade security, passwords cannot be reset locally.\n\n"
-            "Please contact the Administrator to issue a server reset and re-enroll credentials."
+            "Please contact the Administrator to issue a server reset and re-enroll credentials.",
         )
 
     def attempt_login(self):
@@ -762,22 +822,23 @@ class LoginWindow(QMainWindow):
                 private_key = None
                 self.audit.info("Local vault password mismatch for doctor_id=%s", doc_id)
 
-                choice = QMessageBox.question(
-                    self,
+                choice = self._show_message_box(
+                    "question",
                     "Local Vault Locked",
                     "Your server password is valid, but the local vault still uses the previous password.\n\n"
                     "Yes: Enter old local password and migrate vault.\n"
                     "No: I forgot old local password (re-enroll local keys and request a new certificate).\n"
                     "Cancel: Abort login.",
-                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
                 )
 
                 if choice == QMessageBox.Cancel:
                     raise Exception("Local vault recovery cancelled.")
 
                 if choice == QMessageBox.Yes:
-                    old_local_password, ok = QInputDialog.getText(
-                        self, "Migrate Local Vault", "Enter previous local vault password to migrate:", QLineEdit.Password
+                    old_local_password, ok = self._prompt_password(
+                        "Migrate Local Vault",
+                        "Enter previous local vault password to migrate:",
                     )
                     if not ok or not old_local_password:
                         raise Exception("Local vault migration cancelled.")
@@ -828,7 +889,7 @@ class LoginWindow(QMainWindow):
                 doctor_pqc_public_bytes=pqc_pub,
                 doctor_tls_private_key=tls_private_key,
             )
-            onboard = requests.post(
+            onboard = self._session.post(
                 f"{self.pre_enroll_url}/api/pre-enroll/doctors/onboard",
                 json={"id": doc_id, "csr_pem": csr_pem},
                 headers={"X-Enroll-Token": enroll_token},
@@ -873,7 +934,7 @@ class LoginWindow(QMainWindow):
                 return
 
             verify_arg = self._prepare_tls_material()
-            resp = requests.get(
+            resp = self._session.get(
                 f"{self.pre_enroll_url}/api/pre-enroll/auth/my-cert/{doc_id}",
                 headers={"X-Enroll-Token": enroll_token},
                 verify=verify_arg,

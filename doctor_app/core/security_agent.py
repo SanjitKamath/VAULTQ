@@ -19,6 +19,19 @@ from .audit_logger import get_audit_logger
 
 UPLOAD_TIMEOUT_SECONDS = float(os.getenv("VAULTQ_UPLOAD_TIMEOUT_SECONDS", "30"))
 
+def _parse_positive_timeout(var_name: str, default: float) -> float:
+    raw = os.getenv(var_name, "").strip()
+    try:
+        value = float(raw) if raw else float(default)
+    except ValueError:
+        value = float(default)
+    if value <= 0:
+        return float(default)
+    return value
+
+
+MTLS_PING_TIMEOUT_SECONDS = _parse_positive_timeout("VAULTQ_MTLS_PING_TIMEOUT_SECONDS", 1.0)
+
 
 def _print_crypto_data(label: str, data: bytes):
     if os.getenv("VAULTQ_DEBUG_CRYPTO", "0") != "1":
@@ -71,6 +84,7 @@ class SecurityAgent:
         self.crypto_suite = crypto_suite
         self.hybrid_session = None
         self._server_classical_public_key = None
+        self._session = requests.Session()
         
         self.update_crypto_suite(crypto_suite)
         
@@ -93,6 +107,8 @@ class SecurityAgent:
         
         self.log("Security agent initialized", "INFO")
         self.audit.info("SecurityAgent init for doctor_id=%s", self.doctor_id)
+
+        self.warmup_mtls()
         
         # Load existing ML-DSA Identity for application-layer signing
         if "Classical" in self.crypto_suite:
@@ -123,6 +139,22 @@ class SecurityAgent:
         else:
             self.hybrid_session = pqc_hybrid
             self.log("Crypto suite switched to PQC", "INFO")
+
+    def warmup_mtls(self):
+        threading.Thread(target=self._warmup_task, daemon=True).start()
+
+    def _warmup_task(self):
+        doctor_id = (self.doctor_id or "").strip()
+        if not doctor_id:
+            return
+        try:
+            self._session.get(
+                f"{config.server_url}/api/auth/my-cert/{doctor_id}",
+                timeout=MTLS_PING_TIMEOUT_SECONDS,
+                **self._tls_request_kwargs(),
+            )
+        except Exception:
+            pass
 
     def initiate_handshake(self):
         """
@@ -164,7 +196,7 @@ class SecurityAgent:
         if self.enroll_token:
             headers["X-Enroll-Token"] = self.enroll_token
 
-        resp = requests.get(
+        resp = self._session.get(
             f"{pre_enroll_url}/api/pre-enroll/auth/my-cert/{doctor_id}",
             headers=headers,
             timeout=5,
@@ -189,9 +221,9 @@ class SecurityAgent:
             # Doctor-safe connectivity check (does not require admin token).
             # Returns {"status": "pending"} or {"status": "issued"}.
             doctor_id = self.doctor_id or "unknown"
-            resp = requests.get(
+            resp = self._session.get(
                 f"{config.server_url}/api/auth/my-cert/{doctor_id}",
-                timeout=5,
+                timeout=MTLS_PING_TIMEOUT_SECONDS,
                 **self._tls_request_kwargs(),
             )
             resp.raise_for_status()
@@ -208,9 +240,9 @@ class SecurityAgent:
                     if self._refresh_cert_from_pre_enroll():
                         self.log("Fetched latest issued certificate. Retrying mTLS handshake...", "INFO")
                         self.audit.info("mTLS recovery: refreshed cert from pre-enroll for doctor_id=%s", self.doctor_id)
-                        resp = requests.get(
+                        resp = self._session.get(
                             f"{config.server_url}/api/auth/my-cert/{self.doctor_id or 'unknown'}",
-                            timeout=5,
+                            timeout=MTLS_PING_TIMEOUT_SECONDS,
                             **self._tls_request_kwargs(),
                         )
                         resp.raise_for_status()
@@ -241,7 +273,7 @@ class SecurityAgent:
         if self._server_classical_public_key is not None:
             return self._server_classical_public_key
 
-        resp = requests.get(
+        resp = self._session.get(
             f"{config.server_url}/api/doctor/classical/public-key",
             timeout=10,
             **self._tls_request_kwargs(),
@@ -255,6 +287,58 @@ class SecurityAgent:
         public_key_bytes = base64.b64decode(public_key_b64)
         self._server_classical_public_key = rsa_classical.load_public_key(public_key_bytes)
         return self._server_classical_public_key
+
+    def fetch_valid_appointments(self) -> list:
+        doctor_id = (self.doctor_id or "").strip()
+        if not doctor_id:
+            raise RuntimeError("Doctor ID missing for appointment lookup.")
+        resp = self._session.get(
+            f"{config.server_url}/api/doctor/appointments/valid?doctor_id={doctor_id}",
+            timeout=10,
+            **self._tls_request_kwargs(),
+        )
+        resp.raise_for_status()
+        body = resp.json() if resp.content else {}
+        return body.get("appointments", [])
+
+    def fetch_upcoming_appointments(self) -> list:
+        doctor_id = (self.doctor_id or "").strip()
+        if not doctor_id:
+            raise RuntimeError("Doctor ID missing for appointment lookup.")
+        resp = self._session.get(
+            f"{config.server_url}/api/doctor/appointments/upcoming?doctor_id={doctor_id}",
+            timeout=10,
+            **self._tls_request_kwargs(),
+        )
+        resp.raise_for_status()
+        body = resp.json() if resp.content else {}
+        return body.get("appointments", [])
+
+    def fetch_patients(self) -> list:
+        doctor_id = (self.doctor_id or "").strip()
+        if not doctor_id:
+            raise RuntimeError("Doctor ID missing for patient lookup.")
+        resp = self._session.get(
+            f"{config.server_url}/api/doctor/patients?doctor_id={doctor_id}",
+            timeout=10,
+            **self._tls_request_kwargs(),
+        )
+        resp.raise_for_status()
+        body = resp.json() if resp.content else {}
+        return body.get("patients", [])
+
+    def validate_appointment(self, patient_id: str) -> dict:
+        doctor_id = (self.doctor_id or "").strip()
+        patient_id = (patient_id or "").strip()
+        if not doctor_id or not patient_id:
+            raise RuntimeError("Doctor ID and patient ID are required for validation.")
+        resp = self._session.get(
+            f"{config.server_url}/api/doctor/appointments/validate?doctor_id={doctor_id}&patient_id={patient_id}",
+            timeout=10,
+            **self._tls_request_kwargs(),
+        )
+        resp.raise_for_status()
+        return resp.json() if resp.content else {}
 
     def prepare_patient_payload(self, patient_id: str, file_data: bytes, server_rsa_public_key=None) -> dict:
         """
@@ -384,7 +468,7 @@ class SecurityAgent:
             # Transmit securely over mTLS
             self.log("Transmitting Secure Envelope over mTLS...", "INFO")
             upload_start = time.perf_counter()
-            resp = requests.post(
+            resp = self._session.post(
                 f"{config.server_url}/api/doctor/upload", 
                 json=envelope.model_dump(),
                 timeout=UPLOAD_TIMEOUT_SECONDS,

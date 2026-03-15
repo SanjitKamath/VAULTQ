@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf" content="{{CSRF_TOKEN}}">
     <title>VaultQ | System Administration</title>
+    <link rel="icon" type="image/svg+xml" href="/admin/static/favicon.svg">
+    <link rel="shortcut icon" href="/admin/static/favicon.svg">
     <link rel="stylesheet" href="/admin/static/admin.tailwind.css" integrity="sha384-VINUIuRueYPCfmQYB23tL8t+S7KEg8ti6p7XkGStuVsdPfUhvYthgoqzwVSrgnbq" crossorigin="anonymous">
     <script src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js" integrity="sha384-9Ax3MmS9AClxJyd5/zafcXXjxmwFhZCdsT6HJoJjarvCaAkJlk5QDzjLJm+Wdx5F" crossorigin="anonymous" defer></script>
     <style>
@@ -216,6 +218,137 @@
         box-shadow:0 0 18px rgba(16,185,129,.25);
         }
 
+        /* Appointment picker modal */
+
+        .modal-backdrop{
+        background:radial-gradient(circle at 30% 20%,rgba(245,158,11,.08),transparent 45%),rgba(2,6,23,.78);
+        backdrop-filter:blur(8px);
+        }
+
+        .modal-card{
+        background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(2,6,23,.95));
+        border:1px solid rgba(148,163,184,.2);
+        border-radius:18px;
+        box-shadow:0 24px 70px rgba(0,0,0,.55);
+        }
+
+        .picker-button{
+        background:linear-gradient(135deg,rgba(15,23,42,.95),rgba(15,23,42,.6));
+        border:1px solid #334155;
+        border-radius:14px;
+        padding:10px 12px;
+        color:#e2e8f0;
+        font-size:13px;
+        transition:transform .2s ease, box-shadow .2s ease, border .2s ease;
+        }
+
+        .picker-button:hover{
+        transform:translateY(-1px);
+        border-color:#f59e0b;
+        box-shadow:0 10px 24px rgba(245,158,11,.2);
+        }
+
+        .picker-dropdown{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        }
+
+        .picker-chip{
+        background:#0b1220;
+        border:1px solid #1f2937;
+        border-radius:999px;
+        padding:4px 10px;
+        font-size:11px;
+        color:#94a3b8;
+        }
+
+        .calendar-header{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        padding:10px 12px;
+        border-radius:12px;
+        background:#0b1220;
+        border:1px solid #1f2937;
+        }
+
+        .calendar-grid{
+        display:grid;
+        grid-template-columns:repeat(7,1fr);
+        gap:8px;
+        }
+
+        .calendar-weekdays{
+        display:grid;
+        grid-template-columns:repeat(7,1fr);
+        gap:8px;
+        margin-bottom:8px;
+        }
+
+        .calendar-day{
+        height:38px;
+        border-radius:10px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:13px;
+        background:#0f172a;
+        border:1px solid #1f2937;
+        color:#cbd5f5;
+        transition:transform .15s ease, border .2s ease, background .2s ease;
+        }
+
+        .calendar-day:hover{
+        transform:translateY(-1px);
+        border-color:#f59e0b;
+        }
+
+        .calendar-day.is-muted{
+        color:#475569;
+        background:#0b1220;
+        border-color:#111827;
+        }
+
+        .calendar-day.is-selected{
+        background:rgba(245,158,11,.2);
+        border-color:#f59e0b;
+        color:#fef3c7;
+        font-weight:700;
+        }
+
+        .time-pill{
+        padding:8px 12px;
+        border-radius:999px;
+        background:#0b1220;
+        border:1px solid #1f2937;
+        color:#cbd5f5;
+        font-size:12px;
+        transition:transform .15s ease, border .2s ease, background .2s ease;
+        }
+
+        .time-pill:hover{
+        transform:translateY(-1px);
+        border-color:#38bdf8;
+        }
+
+        .time-pill.is-selected{
+        background:rgba(56,189,248,.15);
+        border-color:#38bdf8;
+        color:#e0f2fe;
+        font-weight:700;
+        }
+
+        .time-scroll{
+        max-height:220px;
+        overflow:auto;
+        display:flex;
+        flex-wrap:wrap;
+        gap:10px;
+        padding:6px 4px 4px 2px;
+        }
+
         </style>
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans antialiased min-h-screen flex flex-col selection:bg-cyan-500/30">
@@ -250,6 +383,14 @@
             
             <aside class="w-64 shrink-0 bg-slate-950/50 border-r border-slate-800 flex flex-col py-8 px-4 gap-2 z-10 hidden md:flex">
                 <div class="text-[30px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2"></div>
+
+                <button @click="activeTab = 'appointments'"
+                        class="flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all duration-200 text-sm text-left group"
+                        :class="activeTab === 'appointments' 
+                            ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20' 
+                            : 'text-slate-400 border border-transparent hover:bg-slate-800/50 hover:text-slate-200'">
+                    Appointments
+                </button>
                 
                 <button @click="activeTab = 'patients'"
                         class="flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all duration-200 text-sm text-left group"
@@ -266,6 +407,7 @@
                             : 'text-slate-400 border border-transparent hover:bg-slate-800/50 hover:text-slate-200'">
                     Doctor Portal
                 </button>
+
             </aside>
 
             <main class="flex-1 min-w-0 p-6 lg:p-10 relative">
@@ -454,6 +596,174 @@
                         </div>
                     </div>
 
+                    <div x-show="activeTab === 'appointments'" 
+                         x-transition:enter="transition ease-out duration-300"
+                         x-transition:enter-start="opacity-0 translate-y-2"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         style="display: none;">
+
+                        <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8 shadow-2xl">
+                            <h3 class="text-xl font-bold mb-4 text-amber-400">Schedule Appointment</h3>
+                            <p class="text-gray-400 text-sm mb-4">Appointments gate doctor uploads for 24 hours after the appointment time.</p>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs text-gray-400 uppercase">Doctor</label>
+                                    <select x-model="newAppointment.doctor_id" class="bg-black border border-gray-700 p-3 rounded-lg w-full text-white focus:border-amber-500 outline-none">
+                                        <option value="">Select doctor</option>
+                                        <template x-for="doc in doctors" :key="doc.id">
+                                            <option :value="doc.id" x-text="doc.id + ' - ' + doc.name"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 uppercase">Patient</label>
+                                    <select x-model="newAppointment.patient_id" class="bg-black border border-gray-700 p-3 rounded-lg w-full text-white focus:border-amber-500 outline-none">
+                                        <option value="">Select patient</option>
+                                        <template x-for="pat in patients" :key="pat.id">
+                                            <option :value="pat.id" x-text="pat.id + ' - ' + pat.name"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 uppercase">Appointment Time</label>
+                                    <button type="button" @click="openPicker('create')" class="picker-button w-full text-left">
+                                        <div class="picker-dropdown">
+                                            <div>
+                                                <span class="text-[10px] text-slate-400 uppercase block">Set time (IST)</span>
+                                                <span class="text-sm" x-text="appointmentDisplay || 'Select appointment time'"></span>
+                                            </div>
+                                            <span class="picker-chip">Pick</span>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="mt-6">
+                                <button @click="createAppointment()"
+                                        class="bg-amber-600 px-8 py-3 rounded-lg font-bold hover:bg-amber-500 transition-all">
+                                    Create Appointment
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Appointment Picker Modal -->
+                        <div x-show="pickerOpen" x-cloak
+                             x-transition:enter="transition ease-out duration-200"
+                             x-transition:enter-start="opacity-0"
+                             x-transition:enter-end="opacity-100"
+                             x-transition:leave="transition ease-in duration-150"
+                             x-transition:leave-start="opacity-100"
+                             x-transition:leave-end="opacity-0"
+                             class="fixed inset-0 z-50 flex items-center justify-center">
+                            <div class="absolute inset-0 modal-backdrop" @click="closePicker()"></div>
+                            <div class="modal-card relative w-[92%] max-w-4xl p-6">
+                                <div class="flex items-center justify-between mb-5">
+                                    <div>
+                                        <h3 class="text-lg font-bold text-amber-300" x-text="pickerMode === 'edit' ? 'Edit Appointment Time (IST)' : 'Set Appointment Time (IST)'"></h3>
+                                        <p class="text-xs text-slate-400">Pick a date and time in IST. Past times are blocked.</p>
+                                        <p class="text-xs text-slate-500" x-text="newAppointment.doctor_id && newAppointment.patient_id ? 'Doctor: ' + newAppointment.doctor_id + ' | Patient: ' + newAppointment.patient_id : ''"></p>
+                                    </div>
+                                    <button @click="closePicker()" class="text-slate-400 hover:text-slate-200">Close</button>
+                                </div>
+
+                                <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_.8fr] gap-6">
+                                    <div>
+                                        <div class="calendar-header mb-4">
+                                            <button @click="shiftMonth(-1)" class="text-slate-300 hover:text-white">Prev</button>
+                                            <div class="text-sm font-semibold" x-text="pickerMonthLabel"></div>
+                                            <button @click="shiftMonth(1)" class="text-slate-300 hover:text-white">Next</button>
+                                        </div>
+                                        <div class="calendar-weekdays text-[10px] tracking-widest text-slate-500 uppercase">
+                                            <span class="text-center">Mo</span>
+                                            <span class="text-center">Tu</span>
+                                            <span class="text-center">We</span>
+                                            <span class="text-center">Th</span>
+                                            <span class="text-center">Fr</span>
+                                            <span class="text-center">Sa</span>
+                                            <span class="text-center">Su</span>
+                                        </div>
+                                        <div class="calendar-grid">
+                                            <template x-for="day in calendarDays" :key="day.key">
+                                                <button type="button"
+                                                        class="calendar-day"
+                                                        :class="{ 'is-muted': !day.inMonth || day.isPast, 'is-selected': day.isSelected }"
+                                                        @click="selectDay(day)">
+                                                    <span x-text="day.label"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div class="flex items-center justify-between mb-4">
+                                            <span class="text-xs text-slate-400 uppercase">Time Slots</span>
+                                            <span class="text-xs text-slate-500" x-text="selectedTimeDisplay"></span>
+                                        </div>
+                                        <div class="time-scroll">
+                                            <template x-for="slot in timeSlots" :key="slot.label">
+                                                <button type="button"
+                                                        class="time-pill"
+                                                        :class="{ 'is-selected': pickerTime === slot.label, 'opacity-40 cursor-not-allowed': slot.disabled }"
+                                                        :disabled="slot.disabled"
+                                                        @click="slot.disabled ? null : (pickerTime = slot.label)">
+                                                    <span x-text="slot.label"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <div x-show="pickerError" class="mt-4 text-xs text-red-400" x-text="pickerError"></div>
+                                        <div class="mt-6 flex items-center justify-between">
+                                            <div class="text-xs text-slate-400">Saved in IST timezone</div>
+                                            <div class="flex gap-3">
+                                                <button @click="closePicker()" class="admin-btn bg-slate-800 text-slate-300">Cancel</button>
+                                                <button @click="confirmPicker()" class="admin-btn btn-emerald glow-emerald" x-text="pickerMode === 'edit' ? 'Save Changes' : 'Confirm'"></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
+                            <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                                <h2 class="text-xl font-bold">Appointments</h2>
+                                <button @click="refresh()" class="text-sm text-amber-500 hover:underline">Refresh</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left whitespace-nowrap">
+                                    <thead class="bg-black/50 text-gray-400 uppercase text-xs">
+                                        <tr>
+                                            <th class="py-4 px-4">Appointment ID</th>
+                                            <th class="py-4 px-4">Doctor</th>
+                                            <th class="py-4 px-4">Patient</th>
+                                            <th class="py-4 px-4">Time (IST)</th>
+                                            <th class="py-4 px-4">Expiry (IST)</th>
+                                            <th class="py-4 px-4 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template x-for="apt in appointments" :key="apt.apt_id">
+                                            <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition">
+                                                <td class="py-4 px-4 font-mono text-amber-400" x-text="apt.apt_id"></td>
+                                                <td class="py-4 px-4 font-mono" x-text="apt.doctor_id"></td>
+                                                <td class="py-4 px-4 font-mono" x-text="apt.patient_id"></td>
+                                                <td class="py-4 px-4" x-text="formatIst(apt.appointment_time_ist)"></td>
+                                                <td class="py-4 px-4" x-text="formatIst(apt.expires_at_ist)"></td>
+                                                <td class="py-4 px-4 text-right">
+                                                    <button @click="startEditAppointment(apt)" class="text-xs text-amber-300 hover:text-amber-200 font-bold mr-6">EDIT</button>
+                                                    <button @click="deleteAppointment(apt.apt_id)" class="text-xs text-red-500 hover:text-red-400 font-bold">DELETE</button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="appointments.length === 0">
+                                            <td colspan="6" class="py-12 text-center text-slate-500 italic">No appointments scheduled.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </main>
         </div>
@@ -462,30 +772,335 @@
     <script>
         function adminApp() {
             return {
-                activeTab: 'patients',
+                activeTab: 'appointments',
                 stats: { ca_status: 'Connecting...' },
                 serverState: { crypto_suite: 'Loading...' },
                 doctors: [],
                 patients: [],
+                appointments: [],
                 newDocName: '',
                 lastProvisioned: null,
                 newPatientName: '',
                 lastProvisionedPatient: null,
+                newAppointment: {
+                    doctor_id: '',
+                    patient_id: '',
+                    appointment_time: '',
+                },
+                appointmentDisplay: '',
+                pickerOpen: false,
+                pickerMode: 'create',
+                pickerError: '',
+                pickerYear: 0,
+                pickerMonth: 0,
+                pickerDay: 0,
+                pickerTime: '09:00',
+                pickerMonthLabel: '',
+                calendarDays: [],
+                timeSlots: [],
+                selectedTimeDisplay: '',
+                editAppointmentId: '',
 
                 async init() {
+                    this.initPickerDefaults();
+                    this.$watch('pickerMonth', () => this.buildCalendar());
+                    this.$watch('pickerYear', () => this.buildCalendar());
+                    this.$watch('pickerDay', () => this.buildCalendar());
+                    this.$watch('pickerTime', () => this.updateAppointmentDisplay());
+                    this.$watch('newAppointment.doctor_id', () => this.updateTimeSlots());
                     await this.refresh();
+                },
+
+                initPickerDefaults() {
+                    const now = this.getIstNow();
+                    this.pickerYear = now.getFullYear();
+                    this.pickerMonth = now.getMonth() + 1;
+                    this.pickerDay = now.getDate();
+                    this.timeSlots = this.buildTimeSlots();
+                    this.pickerTime = this.timeSlots[0] || '09:00';
+                    this.buildCalendar();
+                    this.updateAppointmentDisplay();
+                },
+
+                getIstNow() {
+                    const now = new Date();
+                    const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+                    return new Date(utcMs + (330 * 60000));
+                },
+
+                istToUtcMs(year, month, day, hour, minute) {
+                    return Date.UTC(year, month - 1, day, hour, minute) - (330 * 60000);
+                },
+
+                buildTimeSlots() {
+                    const slots = [];
+                    for (let h = 9; h < 17; h += 1) {
+                        slots.push(`${String(h).padStart(2, '0')}:00`);
+                        slots.push(`${String(h).padStart(2, '0')}:30`);
+                    }
+                    slots.push('17:00');
+                    return slots;
+                },
+
+                buildCalendar() {
+                    const monthIndex = this.pickerMonth - 1;
+                    const weekday = (this.getIstWeekday(this.pickerYear, this.pickerMonth, 1) + 6) % 7;
+                    const daysInMonth = new Date(this.pickerYear, this.pickerMonth, 0).getDate();
+                    const prevMonthDays = new Date(this.pickerYear, this.pickerMonth - 1, 0).getDate();
+                    const todayIst = this.getIstNow();
+                    const todayKey = `${todayIst.getFullYear()}-${todayIst.getMonth() + 1}-${todayIst.getDate()}`;
+
+                    const calendar = [];
+                    for (let i = weekday - 1; i >= 0; i -= 1) {
+                        const dayNum = prevMonthDays - i;
+                        calendar.push({
+                            key: `p-${dayNum}`,
+                            label: dayNum,
+                            inMonth: false,
+                            isSelected: false,
+                            isPast: this.isPastDay(
+                                this.pickerMonth === 1 ? this.pickerYear - 1 : this.pickerYear,
+                                this.pickerMonth === 1 ? 12 : this.pickerMonth - 1,
+                                dayNum,
+                                todayKey,
+                            ),
+                            year: this.pickerMonth === 1 ? this.pickerYear - 1 : this.pickerYear,
+                            month: this.pickerMonth === 1 ? 12 : this.pickerMonth - 1,
+                            day: dayNum,
+                        });
+                    }
+
+                    for (let day = 1; day <= daysInMonth; day += 1) {
+                        calendar.push({
+                            key: `c-${day}`,
+                            label: day,
+                            inMonth: true,
+                            isSelected: day === this.pickerDay,
+                            isPast: this.isPastDay(this.pickerYear, this.pickerMonth, day, todayKey),
+                            year: this.pickerYear,
+                            month: this.pickerMonth,
+                            day: day,
+                        });
+                    }
+
+                    while (calendar.length % 7 !== 0) {
+                        const dayNum = calendar.length - (weekday + daysInMonth) + 1;
+                        calendar.push({
+                            key: `n-${dayNum}`,
+                            label: dayNum,
+                            inMonth: false,
+                            isSelected: false,
+                            isPast: this.isPastDay(
+                                this.pickerMonth === 12 ? this.pickerYear + 1 : this.pickerYear,
+                                this.pickerMonth === 12 ? 1 : this.pickerMonth + 1,
+                                dayNum,
+                                todayKey,
+                            ),
+                            year: this.pickerMonth === 12 ? this.pickerYear + 1 : this.pickerYear,
+                            month: this.pickerMonth === 12 ? 1 : this.pickerMonth + 1,
+                            day: dayNum,
+                        });
+                    }
+
+                    this.calendarDays = calendar;
+                    const monthLabel = new Date(this.pickerYear, monthIndex, 1).toLocaleString('en-US', { month: 'long' });
+                    this.pickerMonthLabel = `${monthLabel} ${this.pickerYear}`;
+                    this.updateAppointmentDisplay();
+                    this.updateTimeSlots();
+                },
+
+                getIstWeekday(year, month, day) {
+                    const utcMs = Date.UTC(year, month - 1, day);
+                    const istMs = utcMs + (330 * 60000);
+                    return new Date(istMs).getUTCDay();
+                },
+
+                isPastDay(year, month, day, todayKey) {
+                    const key = `${year}-${month}-${day}`;
+                    const compareKey = todayKey || (() => {
+                        const today = this.getIstNow();
+                        return `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+                    })();
+                    if (key === compareKey) return false;
+                    const utcMs = this.istToUtcMs(year, month, day, 0, 0);
+                    const today = this.getIstNow();
+                    const todayUtcMs = this.istToUtcMs(today.getFullYear(), today.getMonth() + 1, today.getDate(), 0, 0);
+                    return utcMs < todayUtcMs;
+                },
+
+                selectDay(day) {
+                    if (!day) return;
+                    if (day.isPast) return;
+                    this.pickerYear = day.year;
+                    this.pickerMonth = day.month;
+                    this.pickerDay = day.day;
+                    this.buildCalendar();
+                },
+
+                openPicker(mode = 'create') {
+                    this.pickerMode = mode;
+                    this.pickerError = '';
+                    if (mode === 'edit' && this.editAppointmentId) {
+                        const apt = this.appointments.find(a => a.apt_id === this.editAppointmentId);
+                        if (apt) {
+                            this.applyAppointmentToPicker(apt);
+                        }
+                    } else if (this.newAppointment.appointment_time) {
+                        this.applyAppointmentStringToPicker(this.newAppointment.appointment_time);
+                    } else {
+                        this.initPickerDefaults();
+                    }
+                    this.buildCalendar();
+                    this.pickerOpen = true;
+                },
+
+                closePicker() {
+                    this.pickerOpen = false;
+                },
+
+                clearPickerDisplay() {
+                    this.pickerYear = 0;
+                    this.pickerMonth = 0;
+                    this.pickerDay = 0;
+                    this.pickerTime = '09:00';
+                    this.appointmentDisplay = '';
+                    this.selectedTimeDisplay = '';
+                },
+
+                confirmPicker() {
+                    this.pickerError = '';
+                    if (this.isSelectedPast()) {
+                        this.pickerError = 'Appointment time cannot be in the past.';
+                        return;
+                    }
+                    if (this.isSelectedConflicting()) {
+                        this.pickerError = 'Doctor already has an appointment within 30 minutes.';
+                        return;
+                    }
+                    const month = String(this.pickerMonth).padStart(2, '0');
+                    const day = String(this.pickerDay).padStart(2, '0');
+                    const datePart = `${this.pickerYear}-${month}-${day}`;
+                    this.newAppointment.appointment_time = `${datePart}T${this.pickerTime}`;
+                    this.updateAppointmentDisplay();
+                    if (this.pickerMode === 'edit') {
+                        this.updateAppointment();
+                        return;
+                    }
+                    this.closePicker();
+                },
+
+                shiftMonth(delta) {
+                    let month = this.pickerMonth + delta;
+                    let year = this.pickerYear;
+                    if (month < 1) {
+                        month = 12;
+                        year -= 1;
+                    }
+                    if (month > 12) {
+                        month = 1;
+                        year += 1;
+                    }
+                    this.pickerMonth = month;
+                    this.pickerYear = year;
+                    this.buildCalendar();
+                },
+
+                applyAppointmentToPicker(apt) {
+                    if (!apt || !apt.appointment_time_ist) return;
+                    const [datePart, timePartRaw] = apt.appointment_time_ist.split('T');
+                    const timePart = timePartRaw ? timePartRaw.split('+')[0] : '';
+                    const [year, month, day] = datePart.split('-');
+                    const [hour, minute] = timePart.split(':');
+                    this.pickerYear = Number(year);
+                    this.pickerMonth = Number(month);
+                    this.pickerDay = Number(day);
+                    this.pickerTime = `${hour}:${minute}`;
+                    this.updateAppointmentDisplay();
+                },
+
+                applyAppointmentStringToPicker(value) {
+                    if (!value) return;
+                    const [datePart, timePart] = value.split('T');
+                    const [year, month, day] = datePart.split('-');
+                    const [hour, minute] = timePart.split(':');
+                    this.pickerYear = Number(year);
+                    this.pickerMonth = Number(month);
+                    this.pickerDay = Number(day);
+                    this.pickerTime = `${hour}:${minute}`;
+                    this.updateAppointmentDisplay();
+                },
+
+                isSelectedPast() {
+                    const [hour, minute] = this.pickerTime.split(':').map(Number);
+                    const selectedMs = this.istToUtcMs(this.pickerYear, this.pickerMonth, this.pickerDay, hour, minute);
+                    return selectedMs < Date.now();
+                },
+
+                isSelectedConflicting() {
+                    const doctorId = this.newAppointment.doctor_id;
+                    if (!doctorId) return false;
+                    const [hour, minute] = this.pickerTime.split(':').map(Number);
+                    const selectedMs = this.istToUtcMs(this.pickerYear, this.pickerMonth, this.pickerDay, hour, minute);
+                    const thirtyMin = 30 * 60 * 1000;
+                    return this.appointments.some(apt => {
+                        if (apt.doctor_id !== doctorId) return false;
+                        if (this.editAppointmentId && apt.apt_id === this.editAppointmentId) return false;
+                        const aptMs = Date.parse(apt.appointment_time_ist);
+                        return Math.abs(aptMs - selectedMs) < thirtyMin;
+                    });
+                },
+
+                updateTimeSlots() {
+                    const slots = this.buildTimeSlots();
+                    const doctorId = this.newAppointment.doctor_id;
+                    const [year, month, day] = [this.pickerYear, this.pickerMonth, this.pickerDay];
+                    this.timeSlots = slots.map(slot => {
+                        const [hour, minute] = slot.split(':').map(Number);
+                        const slotMs = this.istToUtcMs(year, month, day, hour, minute);
+                        const conflict = doctorId && this.appointments.some(apt => {
+                            if (apt.doctor_id !== doctorId) return false;
+                            if (this.editAppointmentId && apt.apt_id === this.editAppointmentId) return false;
+                            const aptMs = Date.parse(apt.appointment_time_ist);
+                            return Math.abs(aptMs - slotMs) < (30 * 60 * 1000);
+                        });
+                        return { label: slot, disabled: !!conflict };
+                    });
+                    if (this.timeSlots.length && this.timeSlots.every(s => s.disabled)) {
+                        this.pickerTime = this.timeSlots[0].label;
+                        return;
+                    }
+                    if (this.timeSlots.length && this.timeSlots.some(s => s.label === this.pickerTime && s.disabled)) {
+                        const firstAvailable = this.timeSlots.find(s => !s.disabled);
+                        if (firstAvailable) {
+                            this.pickerTime = firstAvailable.label;
+                        }
+                    }
+                },
+
+                updateAppointmentDisplay() {
+                    if (!this.pickerYear || !this.pickerMonth || !this.pickerDay || !this.pickerTime) {
+                        this.appointmentDisplay = '';
+                        this.selectedTimeDisplay = '';
+                        return;
+                    }
+                    const month = String(this.pickerMonth).padStart(2, '0');
+                    const day = String(this.pickerDay).padStart(2, '0');
+                    const datePart = `${this.pickerYear}-${month}-${day}`;
+                    this.appointmentDisplay = `${datePart} ${this.pickerTime} IST`;
+                    this.selectedTimeDisplay = `${this.pickerTime} IST`;
                 },
 
                 async refresh() {
                     try {
-                        const [statsRes, docsRes, patsRes, stateRes] = await Promise.all([
+                        const [statsRes, docsRes, patsRes, stateRes, apptRes] = await Promise.all([
                             fetch('/api/admin/stats', { credentials: 'same-origin' }),
                             fetch('/api/admin/doctors', { credentials: 'same-origin' }),
                             fetch('/api/patient/admin/list', { credentials: 'same-origin' }),
                             fetch('/api/admin/state', { credentials: 'same-origin' }),
+                            fetch('/api/admin/appointments', { credentials: 'same-origin' }),
                         ]);
 
-                        if (statsRes.status === 401 || docsRes.status === 401 || stateRes.status === 401) {
+                        if (statsRes.status === 401 || docsRes.status === 401 || stateRes.status === 401 || apptRes.status === 401) {
                             window.location.href = '/admin';
                             return;
                         }
@@ -494,11 +1109,28 @@
                         this.doctors = await docsRes.json();
                         this.patients = await patsRes.json();
                         this.serverState = await stateRes.json();
+                        this.appointments = await apptRes.json();
 
                     } catch (e) {
                         console.error("Failed to refresh dashboard:", e);
                         alert("Network error: " + e.message);
                     }
+                },
+
+                formatIst(value) {
+                    if (!value) return '';
+                    const date = new Date(value);
+                    if (Number.isNaN(date.getTime())) return value;
+                    const formatter = new Intl.DateTimeFormat('en-GB', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                    });
+                    return `${formatter.format(date)} IST`;
                 },
 
                 async provisionDoctor() {
@@ -698,6 +1330,125 @@
                         } else {
                             alert("Failed to delete patient.");
                         }
+                    }
+                },
+
+                async createAppointment() {
+                    const payload = {
+                        doctor_id: this.newAppointment.doctor_id,
+                        patient_id: this.newAppointment.patient_id,
+                        appointment_time: this.newAppointment.appointment_time,
+                    };
+
+                    if (!payload.doctor_id || !payload.patient_id || !payload.appointment_time) {
+                        alert("Doctor, patient, and appointment time are required.");
+                        return;
+                    }
+
+                    if (this.isSelectedPast()) {
+                        alert("Appointment time cannot be in the past.");
+                        return;
+                    }
+
+                    if (this.isSelectedConflicting()) {
+                        alert("Doctor already has an appointment within 30 minutes.");
+                        return;
+                    }
+
+                    try {
+                        const resp = await fetch('/api/admin/appointments', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify(payload),
+                        });
+
+                        const body = await resp.json().catch(() => ({}));
+
+                        if (!resp.ok) {
+                            alert(body.detail || "Failed to create appointment.");
+                            return;
+                        }
+
+                        this.newAppointment = { doctor_id: '', patient_id: '', appointment_time: '' };
+                        this.clearPickerDisplay();
+                        await this.refresh();
+
+                    } catch (e) {
+                        alert("Network error while creating appointment: " + e.message);
+                    }
+                },
+
+                async deleteAppointment(aptId) {
+                    if (!confirm(`Delete appointment ${aptId}?`)) return;
+
+                    try {
+                        const resp = await fetch(`/api/admin/appointments/${aptId}`, {
+                            method: 'DELETE',
+                            credentials: 'same-origin',
+                        });
+
+                        const body = await resp.json().catch(() => ({}));
+
+                        if (!resp.ok) {
+                            alert(body.detail || "Failed to delete appointment.");
+                            return;
+                        }
+
+                        await this.refresh();
+
+                    } catch (e) {
+                        alert("Network error while deleting appointment: " + e.message);
+                    }
+                },
+
+                startEditAppointment(apt) {
+                    this.editAppointmentId = apt.apt_id;
+                    this.newAppointment = {
+                        doctor_id: apt.doctor_id,
+                        patient_id: apt.patient_id,
+                        appointment_time: '',
+                    };
+                    this.applyAppointmentToPicker(apt);
+                    this.openPicker('edit');
+                },
+
+                async updateAppointment() {
+                    if (!this.editAppointmentId) return;
+                    const payload = {
+                        doctor_id: this.newAppointment.doctor_id,
+                        patient_id: this.newAppointment.patient_id,
+                        appointment_time: this.newAppointment.appointment_time,
+                    };
+
+                    if (!payload.doctor_id || !payload.patient_id || !payload.appointment_time) {
+                        alert("Doctor, patient, and appointment time are required.");
+                        return;
+                    }
+
+                    try {
+                        const resp = await fetch(`/api/admin/appointments/${this.editAppointmentId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify(payload),
+                        });
+
+                        const body = await resp.json().catch(() => ({}));
+
+                        if (!resp.ok) {
+                            alert(body.detail || "Failed to update appointment.");
+                            return;
+                        }
+
+                        this.editAppointmentId = '';
+                        this.newAppointment = { doctor_id: '', patient_id: '', appointment_time: '' };
+                        this.clearPickerDisplay();
+                        this.closePicker();
+                        await this.refresh();
+
+                    } catch (e) {
+                        alert("Network error while updating appointment: " + e.message);
                     }
                 },
 

@@ -4,6 +4,7 @@ import json
 import time
 import queue
 import requests
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -623,7 +624,7 @@ class VaultQDoctorApp(QMainWindow):
         )
 
         QTimer.singleShot(50, self._process_ui_queue)
-        QTimer.singleShot(800, self._auto_handshake)
+        QTimer.singleShot(0, self._auto_handshake)
 
     def _center_window(self):
         screen = self.screen().availableGeometry()
@@ -739,14 +740,25 @@ class VaultQDoctorApp(QMainWindow):
         left_layout.addSpacing(16)
 
         patient_h = QHBoxLayout()
-        patient_lbl = QLabel("Patient ID:")
+        patient_lbl = QLabel("Patient:")
         patient_lbl.setObjectName("StandardLabel")
-        self.patient_id_entry = QLineEdit()
-        self.patient_id_entry.setPlaceholderText("e.g. PAT-8821")
-        self.patient_id_entry.textChanged.connect(self._check_upload_state)
+        self.patient_combo = QComboBox()
+        self.patient_combo.setMinimumHeight(34)
+        self.patient_combo.setMaxVisibleItems(8)
+        self.patient_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.patient_combo.currentIndexChanged.connect(self._check_upload_state)
+        self.refresh_appts_btn = QPushButton("Refresh Appointments")
+        self.refresh_appts_btn.setMinimumHeight(34)
+        self.refresh_appts_btn.clicked.connect(self._refresh_appointments)
         patient_h.addWidget(patient_lbl)
-        patient_h.addWidget(self.patient_id_entry)
+        patient_h.addWidget(self.patient_combo, stretch=1)
+        patient_h.addWidget(self.refresh_appts_btn)
         left_layout.addLayout(patient_h)
+        left_layout.addSpacing(8)
+
+        appointment_hint = QLabel("Uploads are allowed only after the appointment time and up to 24 hours after.")
+        appointment_hint.setObjectName("StandardLabel")
+        left_layout.addWidget(appointment_hint)
         left_layout.addSpacing(16)
 
         self.drop_zone = FileDropZone()
@@ -776,6 +788,17 @@ class VaultQDoctorApp(QMainWindow):
         right_col.setMaximumWidth(400)
         right_layout = QVBoxLayout(right_col)
         right_layout.setContentsMargins(0, 0, 0, 0)
+
+        upcoming_header = QLabel("Upcoming Appointments")
+        upcoming_header.setObjectName("TabHeader")
+        right_layout.addWidget(upcoming_header)
+        right_layout.addSpacing(8)
+
+        self.upcoming_list = QListWidget()
+        self.upcoming_list.setObjectName("HistoryList")
+        self.upcoming_list.setMinimumHeight(180)
+        right_layout.addWidget(self.upcoming_list)
+        right_layout.addSpacing(16)
 
         history_header = QLabel("Recent Uploads")
         history_header.setObjectName("TabHeader")
@@ -872,6 +895,10 @@ class VaultQDoctorApp(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         self.theme_btn.setText("Light Mode" if self.is_dark_mode else "Dark Mode")
         self.settings.setValue("theme/is_dark_mode", self.is_dark_mode)
+
+        if self._login_window is not None:
+            self._login_window.is_dark_mode = self.is_dark_mode
+            self._login_window._apply_theme(self.is_dark_mode)
 
         pixmap = self.grab()
         self.overlay = QLabel(self)
@@ -1198,6 +1225,7 @@ class VaultQDoctorApp(QMainWindow):
             self.status_label.setText("● Secure Connection")
             self.status_label.setObjectName("StatusLabelOnline")
             self.connect_btn.setProperty("status", "online")
+            self._refresh_appointments()
         else:
             self.status_label.setText("● Disconnected")
             self.status_label.setObjectName("StatusLabelOffline")
@@ -1225,48 +1253,226 @@ class VaultQDoctorApp(QMainWindow):
         self._check_upload_state()
 
     def _check_upload_state(self):
-        if getattr(self.agent, "is_connected", False) and self.selected_file_path and self.patient_id_entry.text().strip():
+        patient_id = self._get_selected_patient_id()
+        if getattr(self.agent, "is_connected", False) and self.selected_file_path and patient_id:
             self.upload_btn.setEnabled(True)
+            return
+        self.upload_btn.setEnabled(False)
+
+    def _get_selected_patient_id(self) -> str:
+        if not hasattr(self, "patient_combo"):
+            return ""
+        value = self.patient_combo.currentData()
+        return str(value).strip() if value else ""
+
+    def _load_appointment_options(self, appointments: list):
+        self.patient_combo.blockSignals(True)
+        self.patient_combo.clear()
+        if not appointments:
+            self.patient_combo.addItem("No valid appointments", None)
+            self.patient_combo.setEnabled(False)
         else:
-            self.upload_btn.setEnabled(False)
+            self.patient_combo.addItem("Select patient", None)
+            for appt in appointments:
+                patient_id = appt.get("patient_id", "")
+                name = appt.get("patient_name", "")
+                apt_time = appt.get("appointment_time_ist", "")
+                expires_at = appt.get("expires_at_ist", "")
+                label = f"{patient_id} - {name}" if name else str(patient_id)
+                self.patient_combo.addItem(label, patient_id)
+                idx = self.patient_combo.count() - 1
+                tooltip = f"Appointment: {self._format_ist(apt_time)}\nValid until: {self._format_ist(expires_at)}"
+                self.patient_combo.setItemData(idx, tooltip, Qt.ToolTipRole)
+            self.patient_combo.setEnabled(True)
+        self.patient_combo.blockSignals(False)
+        self._check_upload_state()
+
+    def _load_upcoming_appointments(self, appointments: list):
+        self.upcoming_list.clear()
+        if not appointments:
+            self.upcoming_list.addItem("No upcoming appointments")
+            return
+        for appt in appointments[:10]:
+            patient_id = appt.get("patient_id", "")
+            name = appt.get("patient_name", "")
+            apt_time = appt.get("appointment_time_ist", "")
+            label = f"{patient_id} - {name}" if name else str(patient_id)
+            item = QListWidgetItem(f"🗓️ {label}\n⏰ {self._format_ist(apt_time)}")
+            self.upcoming_list.addItem(item)
+
+    def _format_ist(self, value: str) -> str:
+        if not value:
+            return ""
+        try:
+            iso_part = value.split("+")[0].replace("Z", "")
+            dt = datetime.fromisoformat(iso_part)
+            return dt.strftime("%d/%m/%Y %H:%M IST")
+        except Exception:
+            return str(value)
+
+    def _refresh_appointments(self):
+        if not getattr(self.agent, "is_connected", False):
+            self._show_message_box("warning", "Not Connected", "Connect to the server before loading appointments.")
+            return
+        self._start_refresh_animation()
+        try:
+            appointments = self.agent.fetch_valid_appointments()
+            self._load_appointment_options(appointments)
+            upcoming = self.agent.fetch_upcoming_appointments()
+            self._load_upcoming_appointments(upcoming)
+            self.append_log("Appointments refreshed.", "INFO")
+        except Exception as e:
+            self.append_log(f"Appointment refresh failed: {e}", "ERROR")
+            self._show_message_box("error", "Appointment Error", str(e))
+        finally:
+            self._stop_refresh_animation()
+
+    def _start_refresh_animation(self):
+        self.refresh_appts_btn.setEnabled(False)
+        self.refresh_appts_btn.setText("Refreshing...")
+        effect = QGraphicsOpacityEffect(self.patient_combo)
+        self.patient_combo.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity")
+        anim.setDuration(250)
+        anim.setStartValue(0.6)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.InOutQuad)
+        anim.start()
+        self._refresh_anim = anim
+
+    def _stop_refresh_animation(self):
+        self.refresh_appts_btn.setEnabled(True)
+        self.refresh_appts_btn.setText("Refresh Appointments")
+
+    def _start_upload_animation(self):
+        self.progress_bar.show()
+        self.progress_bar.setRange(0, 0)
+        effect = QGraphicsOpacityEffect(self.progress_bar)
+        self.progress_bar.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity")
+        anim.setDuration(200)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start()
+        self._upload_anim = anim
+
+    def _finish_upload_animation(self):
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(1)
+        effect = self.progress_bar.graphicsEffect() or QGraphicsOpacityEffect(self.progress_bar)
+        self.progress_bar.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity")
+        anim.setDuration(250)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InOutQuad)
+
+        def _hide():
+            self.progress_bar.hide()
+            self.progress_bar.setGraphicsEffect(None)
+
+        anim.finished.connect(_hide)
+        anim.start()
+        self._upload_anim = anim
+
+    def _apply_message_box_theme(self, box: QMessageBox):
+        font_family = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        if self.is_dark_mode:
+            box.setStyleSheet(f"""
+                QMessageBox {{ background-color: #1C1C1E; color: #EBEBF5; }}
+                QLabel {{ color: #EBEBF5; font-family: {font_family}; font-size: 13px; }}
+                QPushButton {{
+                    background-color: #2C2C2E;
+                    color: #EBEBF5;
+                    border: 1px solid #3A3A3C;
+                    border-radius: 6px;
+                    padding: 6px 14px;
+                    font-family: {font_family};
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background-color: #3A3A3C; }}
+            """)
+        else:
+            box.setStyleSheet(f"""
+                QMessageBox {{ background-color: #F5F5F7; color: #1D1D1F; }}
+                QLabel {{ color: #1D1D1F; font-family: {font_family}; font-size: 13px; }}
+                QPushButton {{
+                    background-color: #FFFFFF;
+                    color: #1D1D1F;
+                    border: 1px solid #D1D1D6;
+                    border-radius: 6px;
+                    padding: 6px 14px;
+                    font-family: {font_family};
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background-color: #F2F2F7; }}
+            """)
+
+    def _show_message_box(self, kind: str, title: str, text: str, buttons: QMessageBox.StandardButtons = QMessageBox.Ok):
+        icon_map = {
+            "info": QMessageBox.Information,
+            "warning": QMessageBox.Warning,
+            "error": QMessageBox.Critical,
+            "question": QMessageBox.Question,
+        }
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setIcon(icon_map.get(kind, QMessageBox.Information))
+        box.setStandardButtons(buttons)
+        self._apply_message_box_theme(box)
+        return box.exec()
 
     def action_upload(self):
-        patient_id = self.patient_id_entry.text().strip()
+        patient_id = self._get_selected_patient_id()
+        if not patient_id:
+            self._show_message_box("warning", "Missing Patient", "Select a patient first.")
+            return
         filename = os.path.basename(self.selected_file_path)
 
         try:
+            validation = self.agent.validate_appointment(patient_id)
+            if not validation.get("allowed", False):
+                self.append_log(
+                    f"Upload blocked: no valid appointment for patient {patient_id}",
+                    "WARNING",
+                )
+                self._show_message_box(
+                    "error",
+                    "Upload Blocked",
+                    "No valid appointment found. Uploads are allowed only after the appointment time and up to 24 hours after.",
+                )
+                return
             form = UploadForm(patient_id=patient_id, filepath=self.selected_file_path)
             
             self.upload_btn.setEnabled(False)
             self.upload_btn.setText("Encrypting & Uploading...")
-            self.progress_bar.show()
-            self.progress_bar.setRange(0, 0)
+            self._start_upload_animation()
             QApplication.processEvents()
 
             self.agent.process_and_upload(form)
             
-            self.progress_bar.setRange(0, 1)
-            self.progress_bar.setValue(1) 
+            self._finish_upload_animation()
             
             item = QListWidgetItem(f"✅ {patient_id}\n📄 {filename}")
             self.history_list.insertItem(0, item)
 
             self.selected_file_path = None
             self.drop_zone.text_label.setText("Drag & Drop your record here\nor click to browse")
-            self.patient_id_entry.clear()
+            self.patient_combo.setCurrentIndex(0)
             self.upload_btn.setText("Encrypt & Secure Upload")
             
-            QTimer.singleShot(1500, self.progress_bar.hide)
 
         except Exception as e:
             self.append_log(f"Upload Error: {e}", "ERROR")
             self.upload_btn.setText("Encrypt & Secure Upload")
-            self.progress_bar.hide()
+            self._finish_upload_animation()
             
             item = QListWidgetItem(f"❌ {patient_id} (Failed)\n📄 {filename}")
             self.history_list.insertItem(0, item)
             
-            QMessageBox.critical(self, "Upload Error", str(e))
+            self._show_message_box("error", "Upload Error", str(e))
 
     def action_change_password(self):
         dlg = PasswordChangeDialog(self)
@@ -1276,7 +1482,8 @@ class VaultQDoctorApp(QMainWindow):
         old_password, new_password, confirm_password = result
 
         try:
-            resp = requests.post(
+            session = getattr(self.agent, "_session", None) or requests
+            resp = session.post(
                 f"{self.server_url}/api/doctor/auth/change-password",
                 json={
                     "doctor_id": self.doctor_id,
@@ -1320,8 +1527,8 @@ class VaultQDoctorApp(QMainWindow):
             ModernMessageBox(self, "Change Password Error", str(e), is_error=True).exec()
 
     def action_sign_out(self):
-        reply = QMessageBox.question(
-            self,
+        reply = self._show_message_box(
+            "question",
             "Sign Out",
             "Are you sure you want to sign out?\nYou will need to log in again.",
             QMessageBox.Yes | QMessageBox.No,

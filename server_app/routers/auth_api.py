@@ -1,6 +1,7 @@
 import os
 import secrets
 import base64
+from functools import lru_cache
 from pydantic import BaseModel
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -128,22 +129,14 @@ def _is_mtls_listener_request(request: Request) -> bool:
     return False
 
 
-def _doctor_id_from_cert_blob(cert_blob) -> str | None:
-    if cert_blob is None:
-        return None
+@lru_cache(maxsize=256)
+def _doctor_id_from_cert_bytes(cert_bytes: bytes) -> str | None:
     cert_obj = None
     try:
-        if isinstance(cert_blob, bytes):
-            try:
-                cert_obj = x509.load_pem_x509_certificate(cert_blob)
-            except Exception:
-                cert_obj = x509.load_der_x509_certificate(cert_blob)
-        elif isinstance(cert_blob, str):
-            raw = cert_blob.strip()
-            if "BEGIN CERTIFICATE" in raw:
-                cert_obj = x509.load_pem_x509_certificate(raw.encode("utf-8"))
-            else:
-                cert_obj = x509.load_der_x509_certificate(base64.b64decode(raw))
+        try:
+            cert_obj = x509.load_pem_x509_certificate(cert_bytes)
+        except Exception:
+            cert_obj = x509.load_der_x509_certificate(cert_bytes)
     except Exception:
         return None
 
@@ -157,6 +150,26 @@ def _doctor_id_from_cert_blob(cert_blob) -> str | None:
     except Exception:
         return None
     return None
+
+
+def _doctor_id_from_cert_blob(cert_blob) -> str | None:
+    if cert_blob is None:
+        return None
+    try:
+        if isinstance(cert_blob, bytes):
+            cert_bytes = cert_blob
+        elif isinstance(cert_blob, str):
+            raw = cert_blob.strip()
+            if "BEGIN CERTIFICATE" in raw:
+                cert_bytes = raw.encode("utf-8")
+            else:
+                cert_bytes = base64.b64decode(raw)
+        else:
+            return None
+    except Exception:
+        return None
+
+    return _doctor_id_from_cert_bytes(cert_bytes)
 
 
 def _extract_authenticated_doctor_id(request: Request) -> str:

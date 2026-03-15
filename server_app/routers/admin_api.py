@@ -2,6 +2,8 @@ import base64
 import secrets
 import string
 import time
+from datetime import datetime, timezone, timedelta
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
@@ -10,6 +12,7 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization
 
 from ..core.database import db
+from ..core.appointments_db import appointments_db
 from ..core.server_state import state
 from ..core.audit_logger import get_audit_logger
 from ..core.auth_utils import hash_password
@@ -51,6 +54,20 @@ class StatusUpdateRequest(BaseModel):
     status: str
 
 
+class AppointmentCreateRequest(BaseModel):
+    doctor_id: str
+    patient_id: str
+    appointment_time: Any
+    expires_at: Optional[Any] = None
+
+
+class AppointmentUpdateRequest(BaseModel):
+    doctor_id: str
+    patient_id: str
+    appointment_time: Any
+    expires_at: Optional[Any] = None
+
+
 # -------------------------------------------------------------------
 # UTILS
 # -------------------------------------------------------------------
@@ -65,6 +82,32 @@ def _cert_expiry_ts(cert) -> float:
     if not_after is None:
         not_after = cert.not_valid_after
     return not_after.timestamp()
+
+
+_IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _parse_time_input(value: Any, field_name: str) -> int:
+    if value is None:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    if isinstance(value, (int, float)):
+        return int(value)
+    raw = str(value).strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    if raw.isdigit():
+        return int(raw)
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an ISO datetime or epoch seconds")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_IST_TZ)
+    return int(dt.timestamp())
+
+
+def _iso_ist(ts: int) -> str:
+    return datetime.fromtimestamp(int(ts), tz=_IST_TZ).isoformat()
 
 
 def _issue_certificate_for_doctor(doc: dict):
@@ -148,6 +191,106 @@ async def get_server_state():
     return {
         "crypto_suite": state.crypto_suite,
     }
+
+
+# -------------------------------------------------------------------
+# APPOINTMENT MANAGEMENT
+# -------------------------------------------------------------------
+
+@router.get("/appointments")
+def list_appointments(_: None = Depends(require_admin_session)):
+    audit.info("Admin appointment list requested")
+    rows = appointments_db.list_appointments()
+    return [
+        {
+            **row,
+            "appointment_time_ist": _iso_ist(row["appointment_time"]),
+            "expires_at_ist": _iso_ist(row["expires_at"]),
+        }
+        for row in rows
+    ]
+
+
+@router.post("/appointments")
+def create_appointment(payload: AppointmentCreateRequest, _: None = Depends(require_admin_session)):
+    doctor_id = (payload.doctor_id or "").strip()
+    patient_id = (payload.patient_id or "").strip()
+    if not doctor_id or not patient_id:
+        raise HTTPException(status_code=400, detail="doctor_id and patient_id are required")
+    if doctor_id not in db.doctors:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if patient_id not in db.patients:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    appointment_time = _parse_time_input(payload.appointment_time, "appointment_time")
+    if appointment_time < int(time.time()):
+        raise HTTPException(status_code=400, detail="Appointment time cannot be in the past")
+    expires_at = None
+    if payload.expires_at is not None:
+        expires_at = _parse_time_input(payload.expires_at, "expires_at")
+
+    try:
+        record = appointments_db.add_appointment(
+            doctor_id=doctor_id,
+            patient_id=patient_id,
+            appointment_time=appointment_time,
+            expires_at=expires_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        **record,
+        "appointment_time_ist": _iso_ist(record["appointment_time"]),
+        "expires_at_ist": _iso_ist(record["expires_at"]),
+    }
+
+
+@router.put("/appointments/{apt_id}")
+def update_appointment(apt_id: str, payload: AppointmentUpdateRequest, _: None = Depends(require_admin_session)):
+    doctor_id = (payload.doctor_id or "").strip()
+    patient_id = (payload.patient_id or "").strip()
+    if not doctor_id or not patient_id:
+        raise HTTPException(status_code=400, detail="doctor_id and patient_id are required")
+    if doctor_id not in db.doctors:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if patient_id not in db.patients:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    appointment_time = _parse_time_input(payload.appointment_time, "appointment_time")
+    if appointment_time < int(time.time()):
+        raise HTTPException(status_code=400, detail="Appointment time cannot be in the past")
+    expires_at = None
+    if payload.expires_at is not None:
+        expires_at = _parse_time_input(payload.expires_at, "expires_at")
+
+    try:
+        record = appointments_db.update_appointment(
+            apt_id=apt_id,
+            doctor_id=doctor_id,
+            patient_id=patient_id,
+            appointment_time=appointment_time,
+            expires_at=expires_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    return {
+        **record,
+        "appointment_time_ist": _iso_ist(record["appointment_time"]),
+        "expires_at_ist": _iso_ist(record["expires_at"]),
+    }
+
+
+@router.delete("/appointments/{apt_id}")
+def delete_appointment(apt_id: str, _: None = Depends(require_admin_session)):
+    deleted = appointments_db.delete_appointment(apt_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return {"message": "Appointment deleted", "apt_id": apt_id}
 
 
 # -------------------------------------------------------------------

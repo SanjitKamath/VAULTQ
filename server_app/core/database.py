@@ -41,6 +41,7 @@ class VaultQDatabase:
         self.db_file = base_dir/ "storage" / "hospital_vault.json"
         self.doctors = {}
         self.certificates = {}
+        self._latest_active_cert_cache = {}
         self.patients = {}
         self.enrollment_tokens = {}
         self._enrollment_lock = threading.Lock()
@@ -67,6 +68,7 @@ class VaultQDatabase:
                     len(self.patients),
                     len(self.enrollment_tokens),
                 )
+                self._rebuild_latest_active_cert_cache()
         except Exception as e:
             self.audit.exception("DB load error: %s", str(e))
 
@@ -118,6 +120,38 @@ class VaultQDatabase:
             len(self.patients),
             len(self.enrollment_tokens),
         )
+
+    def _rebuild_latest_active_cert_cache(self):
+        now_ts = time.time()
+        latest = {}
+        for cert in self.certificates.values():
+            if cert.get("status") != "active":
+                continue
+            expires_at = float(cert.get("expires_at", 0) or 0)
+            if expires_at <= now_ts:
+                continue
+            doctor_id = cert.get("doctor_id")
+            if not doctor_id:
+                continue
+            current = latest.get(doctor_id)
+            if current is None or expires_at > float(current.get("expires_at", 0) or 0):
+                latest[doctor_id] = cert
+        self._latest_active_cert_cache = latest
+
+    def _update_latest_active_cert_cache(self, cert_dict: dict):
+        if not cert_dict:
+            return
+        if cert_dict.get("status") != "active":
+            return
+        expires_at = float(cert_dict.get("expires_at", 0) or 0)
+        if expires_at <= time.time():
+            return
+        doctor_id = cert_dict.get("doctor_id")
+        if not doctor_id:
+            return
+        current = self._latest_active_cert_cache.get(doctor_id)
+        if current is None or expires_at > float(current.get("expires_at", 0) or 0):
+            self._latest_active_cert_cache[doctor_id] = cert_dict
 
     def issue_enrollment_token(self, token: str, doctor_id: str, expires_at: float):
         now_ts = time.time()
@@ -231,6 +265,7 @@ class VaultQDatabase:
         if doctor_id in self.doctors:
             del self.doctors[doctor_id]
             self.certificates = {k: v for k, v in self.certificates.items() if v.get("doctor_id") != doctor_id}
+            self._latest_active_cert_cache.pop(doctor_id, None)
             self.audit.info("DB delete_doctor: doctor_id=%s and associated certs removed", doctor_id)
             self.save_db()
             return True
@@ -245,6 +280,7 @@ class VaultQDatabase:
             
         cert_id = cert_dict.get("id")
         self.certificates[cert_id] = cert_dict
+        self._update_latest_active_cert_cache(cert_dict)
         self.audit.info("DB add_certificate: cert_id=%s doctor_id=%s", cert_id, cert_dict.get("doctor_id"))
         self.save_db()
 
@@ -261,6 +297,7 @@ class VaultQDatabase:
             "expires_at": expires_at,
             "status": "active"
         }
+        self._update_latest_active_cert_cache(self.certificates[cert_id])
         self.audit.info("DB save_certificate_record: cert_id=%s doctor_id=%s", cert_id, doctor_id)
         
         # Save to the JSON file immediately
@@ -278,6 +315,8 @@ class VaultQDatabase:
                 cert["revocation_reason"] = reason
                 revoked += 1
         if revoked:
+            self._latest_active_cert_cache.pop(doctor_id, None)
+            self._rebuild_latest_active_cert_cache()
             self.audit.info(
                 "DB revoke_active_certificates: doctor_id=%s revoked=%s reason=%s",
                 doctor_id,
@@ -289,14 +328,25 @@ class VaultQDatabase:
 
     def get_latest_active_certificate(self, doctor_id: str):
         """Returns the latest active certificate record for a doctor."""
+        now_ts = time.time()
+        cached = self._latest_active_cert_cache.get(doctor_id)
+        if cached:
+            if cached.get("status") == "active" and float(cached.get("expires_at", 0) or 0) > now_ts:
+                return cached
+
         candidates = [
             cert
             for cert in self.certificates.values()
-            if cert.get("doctor_id") == doctor_id and cert.get("status") == "active"
+            if cert.get("doctor_id") == doctor_id
+            and cert.get("status") == "active"
+            and float(cert.get("expires_at", 0) or 0) > now_ts
         ]
         if not candidates:
+            self._latest_active_cert_cache.pop(doctor_id, None)
             return None
-        return max(candidates, key=lambda c: float(c.get("expires_at", 0)))
+        latest = max(candidates, key=lambda c: float(c.get("expires_at", 0) or 0))
+        self._latest_active_cert_cache[doctor_id] = latest
+        return latest
 
     # ── Patient Operations ────────────────────────────────────────────
 
